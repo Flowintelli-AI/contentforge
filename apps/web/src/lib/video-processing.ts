@@ -10,33 +10,18 @@ export interface VideoSegment {
   transcript: string;
 }
 
-interface AssemblyAIUtterance {
-  start: number;
-  end: number;
-  text: string;
-}
-
-interface AssemblyAITranscript {
-  id: string;
-  status: "queued" | "processing" | "completed" | "error";
-  text?: string;
-  error?: string;
-  utterances?: AssemblyAIUtterance[];
-}
-
 /**
- * Transcribes a video via AssemblyAI using the public blob URL.
- * No size limit — AssemblyAI downloads directly from the URL server-side.
+ * Submits a transcription job to AssemblyAI and returns immediately.
+ * AssemblyAI will call the webhookUrl when done with the full transcript.
  */
-export async function transcribeVideo(videoUrl: string): Promise<{
-  transcript: string;
-  segments: { start: number; end: number; text: string }[];
-}> {
+export async function submitTranscriptionJob(
+  videoUrl: string,
+  webhookUrl: string
+): Promise<string> {
   const apiKey = process.env.ASSEMBLYAI_API_KEY;
   if (!apiKey) throw new Error("ASSEMBLYAI_API_KEY is not set");
 
-  // Submit transcription job
-  const submitRes = await fetch("https://api.assemblyai.com/v2/transcript", {
+  const res = await fetch("https://api.assemblyai.com/v2/transcript", {
     method: "POST",
     headers: {
       authorization: apiKey,
@@ -44,53 +29,19 @@ export async function transcribeVideo(videoUrl: string): Promise<{
     },
     body: JSON.stringify({
       audio_url: videoUrl,
-      speaker_labels: false,
-      auto_chapters: false,
       punctuate: true,
       format_text: true,
+      webhook_url: webhookUrl,
     }),
   });
 
-  if (!submitRes.ok) {
-    const err = await submitRes.text();
-    throw new Error(`AssemblyAI submit error ${submitRes.status}: ${err}`);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`AssemblyAI submit error ${res.status}: ${err}`);
   }
 
-  const { id } = (await submitRes.json()) as { id: string };
-
-  // Poll until done (max 10 min)
-  const pollingUrl = `https://api.assemblyai.com/v2/transcript/${id}`;
-  const deadline = Date.now() + 10 * 60 * 1000;
-
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 5000));
-
-    const pollRes = await fetch(pollingUrl, {
-      headers: { authorization: apiKey },
-    });
-    const data = (await pollRes.json()) as AssemblyAITranscript;
-
-    if (data.status === "completed") {
-      const segments = (data.utterances ?? []).map((u) => ({
-        start: u.start / 1000,
-        end: u.end / 1000,
-        text: u.text,
-      }));
-
-      // If no utterances, fall back to full transcript as one segment
-      if (segments.length === 0 && data.text) {
-        segments.push({ start: 0, end: 999, text: data.text });
-      }
-
-      return { transcript: data.text ?? "", segments };
-    }
-
-    if (data.status === "error") {
-      throw new Error(`AssemblyAI transcription failed: ${data.error}`);
-    }
-  }
-
-  throw new Error("AssemblyAI transcription timed out after 10 minutes");
+  const { id } = (await res.json()) as { id: string };
+  return id;
 }
 
 /**

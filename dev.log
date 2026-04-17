@@ -182,3 +182,39 @@
 @contentforge/web:dev:  ✓ Compiled in 335ms (1451 modules)
 @contentforge/web:dev:  ✓ Compiled in 135ms (609 modules)
 @contentforge/web:dev:  ✓ Compiled in 99ms (609 modules)
+@contentforge/web:dev:    Reload env: .env.local
+@contentforge/web:dev:  ✓ Compiled in 316ms (1676 modules)
+@contentforge/web:dev: <w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename 'C:\Users\hugar\Desktop\contentforge\apps\web\.next\cache\webpack\client-development\0.pack.gz_' -> 'C:\Users\hugar\Desktop\contentforge\apps\web\.next\cache\webpack\client-development\0.pack.gz'
+@contentforge/web:dev:  ✓ Compiled in 448ms (1451 modules)
+@contentforge/web:dev:  ✓ Compiled in 119ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 101ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 326ms (1662 modules)
+@contentforge/web:dev: <w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename 'C:\Users\hugar\Desktop\contentforge\apps\web\.next\cache\webpack\client-development\0.pack.gz_' -> 'C:\Users\hugar\Desktop\contentforge\apps\web\.next\cache\webpack\client-development\0.pack.gz'
+@contentforge/web:dev:  ✓ Compiled in 127ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 99ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 97ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 189ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 103ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 111ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 109ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 112ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 104ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 102ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 95ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 108ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 97ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 145ms (609 modules)
+@contentforge/web:dev:  ⚠ Found a change in next.config.mjs. Restarting the server to apply the changes...
+@contentforge/web:dev:   ▲ Next.js 14.2.35
+@contentforge/web:dev:   - Local:        http://localhost:3000
+@contentforge/web:dev:   - Environments: .env.local
+@contentforge/web:dev: 
+@contentforge/web:dev:  ✓ Starting...
+@contentforge/web:dev:  ✓ Ready in 1660ms
+@contentforge/web:dev:  ⚠ Found a change in next.config.mjs. Restarting the server to apply the changes...
+@contentforge/web:dev:   ▲ Next.js 14.2.35
+@contentforge/web:dev:   - Local:        http://localhost:3000
+@contentforge/web:dev:   - Environments: .env.local
+@contentforge/web:dev: 
+@contentforge/web:dev:  ✓ Starting...
+@contentforge/web:dev:  ✓ Ready in 1227ms
