@@ -29,6 +29,7 @@ export async function submitTranscriptionJob(
     },
     body: JSON.stringify({
       audio_url: videoUrl,
+      speech_model: "universal-2",
       punctuate: true,
       format_text: true,
       webhook_url: webhookUrl,
