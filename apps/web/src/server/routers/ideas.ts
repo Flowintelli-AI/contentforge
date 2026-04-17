@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, adminProcedure } from "@/server/trpc";
 import { IdeaStatus, ContentPillarType } from "@prisma/client";
-import { generateRefinedIdea } from "../../lib/ai/agents/contentStrategist";
+import { generateRefinedIdea } from "@/lib/ai/agents/contentStrategist";
 import { TRPCError } from "@trpc/server";
 
-export const ideasRouter = router({
+export const ideasRouter = createTRPCRouter({
   // ── LIST ─────────────────────────────────────────────────────────────
   list: protectedProcedure
     .input(
@@ -15,13 +15,17 @@ export const ideasRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      const { creatorProfile } = ctx;
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      const profile = await ctx.db.creatorProfile.findUnique({ where: { userId: user.id } });
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND", message: "Complete onboarding first" });
+
       const skip = (input.page - 1) * input.limit;
 
       const [ideas, total] = await Promise.all([
         ctx.db.contentIdea.findMany({
           where: {
-            creatorId: creatorProfile.id,
+            creatorId: profile.id,
             ...(input.status && { status: input.status }),
           },
           orderBy: { createdAt: "desc" },
@@ -30,7 +34,7 @@ export const ideasRouter = router({
           include: { scripts: { select: { id: true, status: true } } },
         }),
         ctx.db.contentIdea.count({
-          where: { creatorId: creatorProfile.id, ...(input.status && { status: input.status }) },
+          where: { creatorId: profile.id, ...(input.status && { status: input.status }) },
         }),
       ]);
 
@@ -41,8 +45,13 @@ export const ideasRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      const profile = await ctx.db.creatorProfile.findUnique({ where: { userId: user.id } });
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND" });
+
       const idea = await ctx.db.contentIdea.findFirst({
-        where: { id: input.id, creatorId: ctx.creatorProfile.id },
+        where: { id: input.id, creatorId: profile.id },
         include: { scripts: true, adminReview: true },
       });
       if (!idea) throw new TRPCError({ code: "NOT_FOUND" });
@@ -59,17 +68,20 @@ export const ideasRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { creatorProfile } = ctx;
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      const profile = await ctx.db.creatorProfile.findUnique({
+        where: { userId: user.id },
+        include: { niches: { include: { niche: true } } },
+      });
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND", message: "Complete onboarding first" });
 
       // AI refines the raw idea
-      const refinedIdea = await generateRefinedIdea({
-        rawIdea: input.rawIdea,
-        niche: creatorProfile.niches?.[0]?.niche?.name ?? "general",
-      });
+      const refinedIdea = await generateRefinedIdea(input.rawIdea);
 
       const idea = await ctx.db.contentIdea.create({
         data: {
-          creatorId: creatorProfile.id,
+          creatorId: profile.id,
           rawIdea: input.rawIdea,
           refinedIdea,
           status: IdeaStatus.SUBMITTED,
@@ -78,8 +90,8 @@ export const ideasRouter = router({
         },
       });
 
-      // Queue async script generation job
-      await ctx.jobs.enqueue("generate-script", { ideaId: idea.id });
+      // TODO: enqueue background job for script generation
+      // await jobs.enqueue("generate-script", { ideaId: idea.id });
 
       return idea;
     }),
@@ -94,6 +106,9 @@ export const ideasRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const adminUser = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!adminUser) throw new TRPCError({ code: "NOT_FOUND" });
+
       const idea = await ctx.db.contentIdea.update({
         where: { id: input.id },
         data: { status: input.status },
@@ -103,7 +118,7 @@ export const ideasRouter = router({
         where: { ideaId: input.id },
         create: {
           ideaId: input.id,
-          reviewerId: ctx.user.id,
+          reviewerId: adminUser.id,
           status: input.status === IdeaStatus.APPROVED ? "APPROVED" : "REVISION_REQUESTED",
           notes: input.notes,
           reviewedAt: new Date(),
@@ -117,7 +132,7 @@ export const ideasRouter = router({
 
       await ctx.db.auditLog.create({
         data: {
-          userId: ctx.user.id,
+          userId: adminUser.id,
           action: `IDEA_STATUS_${input.status}`,
           entityType: "ContentIdea",
           entityId: input.id,
@@ -142,13 +157,16 @@ export const ideasRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { creatorProfile } = ctx;
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      const profile = await ctx.db.creatorProfile.findUnique({ where: { userId: user.id } });
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND", message: "Complete onboarding first" });
 
       const created = await ctx.db.$transaction(
         input.ideas.map((idea) =>
           ctx.db.contentIdea.create({
             data: {
-              creatorId: creatorProfile.id,
+              creatorId: profile.id,
               rawIdea: idea.rawIdea,
               status: IdeaStatus.SUBMITTED,
               pillarType: idea.pillarType,
@@ -158,10 +176,8 @@ export const ideasRouter = router({
         )
       );
 
-      // Queue batch processing
-      await ctx.jobs.enqueue("batch-process-ideas", {
-        ideaIds: created.map((i) => i.id),
-      });
+      // TODO: enqueue batch processing
+      // await jobs.enqueue("batch-process-ideas", { ideaIds: created.map((i) => i.id) });
 
       return { created: created.length };
     }),

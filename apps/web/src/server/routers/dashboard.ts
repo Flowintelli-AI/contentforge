@@ -19,20 +19,20 @@ export const dashboardRouter = createTRPCRouter({
       ideasThisMonth,
       scriptsThisMonth,
     ] = await Promise.all([
-      ctx.db.contentIdea.count({ where: { creatorProfileId: profile.id } }),
-      ctx.db.script.count({ where: { idea: { creatorProfileId: profile.id } } }),
-      ctx.db.scheduledPost.count({
-        where: { calendarItem: { creatorProfileId: profile.id }, status: "SCHEDULED" },
+      ctx.db.contentIdea.count({ where: { creatorId: profile.id } }),
+      ctx.db.script.count({ where: { idea: { creatorId: profile.id } } }),
+      ctx.db.contentCalendarItem.count({
+        where: { creatorId: profile.id, status: "SCHEDULED" },
       }),
-      ctx.db.scheduledPost.count({
-        where: { calendarItem: { creatorProfileId: profile.id }, status: "PUBLISHED" },
+      ctx.db.contentCalendarItem.count({
+        where: { creatorId: profile.id, status: "PUBLISHED" },
       }),
       ctx.db.contentIdea.count({
-        where: { creatorProfileId: profile.id, createdAt: { gte: monthStart } },
+        where: { creatorId: profile.id, createdAt: { gte: monthStart } },
       }),
       ctx.db.script.count({
         where: {
-          idea: { creatorProfileId: profile.id },
+          idea: { creatorId: profile.id },
           createdAt: { gte: monthStart },
         },
       }),

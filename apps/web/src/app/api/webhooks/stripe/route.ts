@@ -4,7 +4,7 @@ import { db } from "@contentforge/db";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
-  apiVersion: "2024-06-20",
+  apiVersion: "2024-04-10" as any,
 });
 
 export async function POST(req: Request) {
@@ -27,20 +27,20 @@ export async function POST(req: Request) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
       const orgId = session.metadata?.organizationId;
-      if (orgId) {
+      const stripeSubId = session.subscription as string;
+      if (orgId && stripeSubId) {
         await db.subscription.upsert({
-          where: { organizationId: orgId },
+          where: { stripeSubId },
           create: {
             organizationId: orgId,
             stripeCustomerId: session.customer as string,
-            stripeSubscriptionId: session.subscription as string,
+            stripeSubId,
             tier: (session.metadata?.tier as any) ?? "BASIC",
             status: "ACTIVE",
             currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           },
           update: {
             stripeCustomerId: session.customer as string,
-            stripeSubscriptionId: session.subscription as string,
             status: "ACTIVE",
           },
         });
@@ -51,8 +51,8 @@ export async function POST(req: Request) {
     case "customer.subscription.deleted": {
       const sub = event.data.object as Stripe.Subscription;
       await db.subscription.updateMany({
-        where: { stripeSubscriptionId: sub.id },
-        data: { status: "CANCELLED" },
+        where: { stripeSubId: sub.id },
+        data: { status: "CANCELED" },
       });
       break;
     }
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
       const invoice = event.data.object as Stripe.Invoice;
       if (invoice.subscription) {
         await db.subscription.updateMany({
-          where: { stripeSubscriptionId: invoice.subscription as string },
+          where: { stripeSubId: invoice.subscription as string },
           data: { status: "PAST_DUE" },
         });
       }

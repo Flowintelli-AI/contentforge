@@ -23,11 +23,11 @@ export const scriptsRouter = createTRPCRouter({
       const [scripts, total] = await Promise.all([
         ctx.db.script.findMany({
           where: {
-            idea: { creatorProfileId: profile.id },
+            idea: { creatorId: profile.id },
             ...(input.status ? { status: input.status } : {}),
           },
           include: {
-            idea: { select: { id: true, rawText: true } },
+            idea: { select: { id: true, rawIdea: true } },
             versions: { orderBy: { version: "desc" }, take: 1 },
           },
           orderBy: { createdAt: "desc" },
@@ -36,7 +36,7 @@ export const scriptsRouter = createTRPCRouter({
         }),
         ctx.db.script.count({
           where: {
-            idea: { creatorProfileId: profile.id },
+            idea: { creatorId: profile.id },
             ...(input.status ? { status: input.status } : {}),
           },
         }),
@@ -73,34 +73,30 @@ export const scriptsRouter = createTRPCRouter({
   approve: adminProcedure
     .input(z.object({ id: z.string(), notes: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.script.update({
-        where: { id: input.id },
-        data: {
-          status: "APPROVED",
-          adminReview: {
-            upsert: {
-              create: { status: "APPROVED", reviewedById: ctx.userId, notes: input.notes },
-              update: { status: "APPROVED", notes: input.notes },
-            },
-          },
-        },
+      const adminUser = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!adminUser) throw new TRPCError({ code: "NOT_FOUND" });
+
+      await ctx.db.script.update({ where: { id: input.id }, data: { status: "APPROVED" } });
+
+      return ctx.db.adminReview.upsert({
+        where: { scriptId: input.id },
+        create: { scriptId: input.id, reviewerId: adminUser.id, status: "APPROVED", notes: input.notes, reviewedAt: new Date() },
+        update: { status: "APPROVED", notes: input.notes, reviewedAt: new Date() },
       });
     }),
 
   requestRevision: adminProcedure
     .input(z.object({ id: z.string(), notes: z.string().min(10) }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.script.update({
-        where: { id: input.id },
-        data: {
-          status: "REVISION_REQUESTED",
-          adminReview: {
-            upsert: {
-              create: { status: "REVISION_REQUESTED", reviewedById: ctx.userId, notes: input.notes },
-              update: { status: "REVISION_REQUESTED", notes: input.notes },
-            },
-          },
-        },
+      const adminUser = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!adminUser) throw new TRPCError({ code: "NOT_FOUND" });
+
+      await ctx.db.script.update({ where: { id: input.id }, data: { status: "REVISION_REQUESTED" } });
+
+      return ctx.db.adminReview.upsert({
+        where: { scriptId: input.id },
+        create: { scriptId: input.id, reviewerId: adminUser.id, status: "REVISION_REQUESTED", notes: input.notes, reviewedAt: new Date() },
+        update: { status: "REVISION_REQUESTED", notes: input.notes, reviewedAt: new Date() },
       });
     }),
 });

@@ -32,9 +32,9 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
           { label: "Ideas This Month",  value: stats?.ideasThisMonth  ?? "—", icon: Lightbulb,   href: "/dashboard/ideas"   },
-          { label: "Scripts Generated", value: stats?.totalScripts    ?? "—", icon: FileText,    href: "/dashboard/scripts" },
+          { label: "Scripts Generated", value: stats?.scriptsGenerated ?? "—", icon: FileText,    href: "/dashboard/scripts" },
           { label: "Posts Scheduled",   value: stats?.postsScheduled  ?? "—", icon: Calendar,    href: "/dashboard/calendar"},
-          { label: "Automations Active",value: stats?.automationsActive?? "—", icon: Zap,         href: "/dashboard/automations" },
+          { label: "Posts Published",   value: stats?.postsPublished  ?? "—", icon: Zap,         href: "/dashboard/automations" },
         ].map((s) => (
           <Link key={s.label} href={s.href}>
             <Card className="hover:shadow-md transition-shadow cursor-pointer">

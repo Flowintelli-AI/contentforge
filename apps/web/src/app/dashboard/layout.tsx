@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
-import { api } from "@/lib/trpc/client";
+import { trpc } from "@/lib/trpc/client";
 import {
   LayoutDashboard, Lightbulb, FileText, Video,
   Calendar, Zap, BookOpen, Settings, BarChart3,
@@ -24,7 +24,7 @@ const NAV = [
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { data: profile } = api.creators.getProfile.useQuery();
+  const { data } = trpc.creators.getMyProfile.useQuery();
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -33,8 +33,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Logo */}
         <div className="px-6 py-5 border-b">
           <span className="text-xl font-bold text-indigo-600">ContentForge</span>
-          {profile && (
-            <p className="text-xs text-gray-500 mt-1 truncate">{profile.displayName}</p>
+          {data?.creatorProfile && (
+            <p className="text-xs text-gray-500 mt-1 truncate">{data.creatorProfile.displayName}</p>
           )}
         </div>
 
@@ -64,9 +64,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="px-4 py-4 border-t flex items-center gap-3">
           <UserButton afterSignOutUrl="/" />
           <div className="text-sm min-w-0">
-            <p className="font-medium text-gray-900 truncate">{profile?.displayName ?? "Loading…"}</p>
+            <p className="font-medium text-gray-900 truncate">{data?.creatorProfile?.displayName ?? "Loading…"}</p>
             <p className="text-xs text-gray-500 truncate">
-              {profile?.postingGoal ?? 0} posts/mo goal
+              {data?.creatorProfile?.postingGoal ?? 0} posts/mo goal
             </p>
           </div>
         </div>

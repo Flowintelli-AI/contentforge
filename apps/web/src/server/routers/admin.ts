@@ -17,7 +17,7 @@ export const adminRouter = createTRPCRouter({
           ctx.db.script.findMany({
             where: { status: "PENDING_REVIEW" },
             include: {
-              idea: { include: { creatorProfile: true } },
+              idea: { include: { creator: true } },
               versions: { take: 1, orderBy: { version: "desc" } },
               adminReview: true,
             },
@@ -38,7 +38,7 @@ export const adminRouter = createTRPCRouter({
       ctx.db.user.count(),
       ctx.db.contentIdea.count(),
       ctx.db.script.count({ where: { status: "PENDING_REVIEW" } }),
-      ctx.db.scheduledPost.count({ where: { status: "PUBLISHED" } }),
+      ctx.db.contentCalendarItem.count({ where: { status: "PUBLISHED" } }),
     ]);
     return { totalUsers, totalIdeas, pendingReviews, publishedPosts };
   }),
@@ -56,7 +56,7 @@ export const adminRouter = createTRPCRouter({
         ? {
             OR: [
               { email: { contains: input.search, mode: "insensitive" as const } },
-              { fullName: { contains: input.search, mode: "insensitive" as const } },
+              { name: { contains: input.search, mode: "insensitive" as const } },
             ],
           }
         : {};

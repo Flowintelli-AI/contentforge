@@ -77,7 +77,7 @@ export default function ReviewPage() {
                     <CardTitle className="text-lg">{script.title}</CardTitle>
                     <div className="flex gap-2 mt-1">
                       <Badge variant="outline">
-                        {script.idea?.creatorProfile?.displayName ?? "Unknown creator"}
+                        {script.idea?.creator?.displayName ?? "Unknown creator"}
                       </Badge>
                       <Badge variant="warning">Pending Review</Badge>
                     </div>
@@ -91,14 +91,14 @@ export default function ReviewPage() {
                 {/* Script preview */}
                 <div className="rounded-md bg-muted p-4 text-sm">
                   <p className="font-medium mb-2">Content Idea:</p>
-                  <p className="text-muted-foreground">{truncate(script.idea?.rawText ?? "", 300)}</p>
+                  <p className="text-muted-foreground">{truncate(script.idea?.rawIdea ?? "", 300)}</p>
                 </div>
 
                 {script.versions?.[0] && (
                   <div className="rounded-md bg-muted p-4 text-sm">
                     <p className="font-medium mb-2">Generated Script (latest version):</p>
                     <pre className="whitespace-pre-wrap text-xs text-muted-foreground font-mono">
-                      {JSON.stringify(JSON.parse(script.versions[0].content ?? "{}"), null, 2).slice(0, 600)}…
+                      {JSON.stringify(script.versions[0]?.snapshot ?? {}, null, 2).slice(0, 600)}…
                     </pre>
                   </div>
                 )}

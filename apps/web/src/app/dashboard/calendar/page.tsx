@@ -36,7 +36,7 @@ export default function CalendarPage() {
 
   const itemsByDate = (items ?? []).reduce(
     (acc, item) => {
-      const d = new Date(item.scheduledDate).getDate();
+      const d = new Date(item.scheduledFor).getDate();
       if (!acc[d]) acc[d] = [];
       acc[d].push(item);
       return acc;

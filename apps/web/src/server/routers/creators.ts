@@ -8,11 +8,13 @@ export const creatorsRouter = createTRPCRouter({
       where: { clerkId: ctx.userId },
       include: {
         creatorProfile: {
-          include: { niche: true, influencers: true, contentPillars: true },
+          include: {
+            niches: { include: { niche: true } },
+            influencers: { include: { influencer: true } },
+            socialAccounts: true,
+          },
         },
-        organizations: {
-          include: { organization: { include: { subscription: true } } },
-        },
+        organization: { include: { subscriptions: true } },
       },
     });
     if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
@@ -22,51 +24,47 @@ export const creatorsRouter = createTRPCRouter({
   completeOnboarding: protectedProcedure
     .input(
       z.object({
-        displayName: z.string().min(2).max(60),
-        bio: z.string().max(500).optional(),
-        nicheId: z.string(),
-        primaryPlatforms: z.array(
-          z.enum(["TIKTOK", "INSTAGRAM", "YOUTUBE", "TWITTER", "LINKEDIN"])
-        ),
-        postingGoalPerMonth: z.number().int().min(1).max(200),
-        influencerIds: z.array(z.string()).optional(),
+        niches: z.array(z.string()).min(1).max(3),
+        postingGoal: z.number().int().min(1).max(200),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { clerkId: ctx.userId },
-      });
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
       if (!user) throw new TRPCError({ code: "NOT_FOUND" });
 
       const profile = await ctx.db.creatorProfile.upsert({
         where: { userId: user.id },
         create: {
           userId: user.id,
-          displayName: input.displayName,
-          bio: input.bio,
-          nicheId: input.nicheId,
-          primaryPlatforms: input.primaryPlatforms,
-          postingGoalPerMonth: input.postingGoalPerMonth,
-          influencers: input.influencerIds
-            ? { connect: input.influencerIds.map((id) => ({ id })) }
-            : undefined,
+          displayName: user.name ?? user.email.split("@")[0],
+          postingGoal: input.postingGoal,
+          onboardingDone: true,
+          timezone: "UTC",
         },
         update: {
-          displayName: input.displayName,
-          bio: input.bio,
-          nicheId: input.nicheId,
-          primaryPlatforms: input.primaryPlatforms,
-          postingGoalPerMonth: input.postingGoalPerMonth,
-          influencers: input.influencerIds
-            ? { set: input.influencerIds.map((id) => ({ id })) }
-            : undefined,
+          postingGoal: input.postingGoal,
+          onboardingDone: true,
         },
       });
 
-      await ctx.db.user.update({
-        where: { id: user.id },
-        data: { onboardingComplete: true },
-      });
+      // Upsert niche records and link them
+      for (let i = 0; i < input.niches.length; i++) {
+        const nicheName = input.niches[i];
+        const niche = await ctx.db.niche.upsert({
+          where: { name: nicheName },
+          create: {
+            name: nicheName,
+            slug: nicheName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          },
+          update: {},
+        });
+
+        await ctx.db.nicheOnCreator.upsert({
+          where: { creatorId_nicheId: { creatorId: profile.id, nicheId: niche.id } },
+          create: { creatorId: profile.id, nicheId: niche.id, isPrimary: i === 0 },
+          update: {},
+        });
+      }
 
       return profile;
     }),
@@ -76,12 +74,8 @@ export const creatorsRouter = createTRPCRouter({
       z.object({
         displayName: z.string().min(2).max(60).optional(),
         bio: z.string().max(500).optional(),
-        avatarUrl: z.string().url().optional(),
-        websiteUrl: z.string().url().optional(),
-        postingGoalPerMonth: z.number().int().min(1).max(200).optional(),
-        primaryPlatforms: z
-          .array(z.enum(["TIKTOK", "INSTAGRAM", "YOUTUBE", "TWITTER", "LINKEDIN"]))
-          .optional(),
+        postingGoal: z.number().int().min(1).max(200).optional(),
+        timezone: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -108,5 +102,3 @@ export const creatorsRouter = createTRPCRouter({
       });
     }),
 });
-
-

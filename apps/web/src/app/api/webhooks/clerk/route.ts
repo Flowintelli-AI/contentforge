@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       data: {
         clerkId: data.id,
         email: data.email_addresses[0]?.email_address ?? "",
-        fullName: `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim() || null,
+        name: (`${data.first_name ?? ""} ${data.last_name ?? ""}`.trim()) || (data.email_addresses[0]?.email_address ?? ""),
         avatarUrl: data.image_url ?? null,
       },
     });
@@ -50,17 +50,14 @@ export async function POST(req: Request) {
       where: { clerkId: data.id },
       data: {
         email: data.email_addresses[0]?.email_address ?? undefined,
-        fullName: `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim() || undefined,
+        name: `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim() || undefined,
         avatarUrl: data.image_url ?? undefined,
       },
     });
   }
 
   if (type === "user.deleted") {
-    await db.user.updateMany({
-      where: { clerkId: data.id },
-      data: { deletedAt: new Date() },
-    });
+    await db.user.deleteMany({ where: { clerkId: data.id } });
   }
 
   return NextResponse.json({ received: true });

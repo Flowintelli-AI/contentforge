@@ -3,8 +3,6 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { startOfMonth, endOfMonth, addDays } from "date-fns";
 
-const platformEnum = z.enum(["TIKTOK", "INSTAGRAM", "YOUTUBE", "TWITTER", "LINKEDIN"]);
-
 export const calendarRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
@@ -24,15 +22,13 @@ export const calendarRouter = createTRPCRouter({
 
       return ctx.db.contentCalendarItem.findMany({
         where: {
-          creatorProfileId: profile.id,
-          scheduledDate: { gte: start, lte: end },
+          creatorId: profile.id,
+          scheduledFor: { gte: start, lte: end },
         },
         include: {
-          idea: { select: { rawText: true } },
           script: { select: { title: true } },
-          scheduledPost: true,
         },
-        orderBy: { scheduledDate: "asc" },
+        orderBy: { scheduledFor: "asc" },
       });
     }),
 
@@ -48,29 +44,35 @@ export const calendarRouter = createTRPCRouter({
       if (!user) throw new TRPCError({ code: "NOT_FOUND" });
       const profile = await ctx.db.creatorProfile.findUnique({
         where: { userId: user.id },
-        include: { ideas: { where: { status: "SCRIPTED" }, include: { scripts: true } } },
+        include: {
+          ideas: { where: { status: "SCRIPTED" }, include: { scripts: true } },
+          socialAccounts: { where: { isActive: true } },
+        },
       });
       if (!profile) throw new TRPCError({ code: "NOT_FOUND" });
 
       const start = startOfMonth(new Date(input.year, input.month - 1));
-      const platforms = profile.primaryPlatforms as string[];
-      const postsPerMonth = profile.postingGoalPerMonth;
+      const activePlatforms = profile.socialAccounts.length > 0
+        ? profile.socialAccounts.map((a) => a.platform)
+        : (["TIKTOK"] as const);
+      const postsPerMonth = profile.postingGoal;
       const ideas = profile.ideas.filter((i) => i.scripts.some((s) => s.status === "APPROVED"));
 
+      if (ideas.length === 0) return { created: 0 };
+
       const items = [];
-      for (let i = 0; i < Math.min(postsPerMonth, ideas.length * platforms.length); i++) {
+      for (let i = 0; i < Math.min(postsPerMonth, ideas.length * activePlatforms.length); i++) {
         const idea = ideas[i % ideas.length];
-        const platform = platforms[i % platforms.length];
-        const scheduledDate = addDays(start, Math.floor((i / postsPerMonth) * 28));
+        const platform = activePlatforms[i % activePlatforms.length];
+        const scheduledFor = addDays(start, Math.floor((i / postsPerMonth) * 28));
 
         items.push({
-          creatorProfileId: profile.id,
-          ideaId: idea.id,
+          creatorId: profile.id,
           scriptId: idea.scripts.find((s) => s.status === "APPROVED")?.id,
-          platform: platform as any,
-          scheduledDate,
-          status: "PLANNED" as const,
-          title: `${idea.rawText.slice(0, 60)}… [${platform}]`,
+          platform,
+          scheduledFor,
+          status: "DRAFT" as const,
+          title: idea.rawIdea.slice(0, 60) + "... [" + platform + "]",
         });
       }
 
@@ -82,8 +84,8 @@ export const calendarRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string(),
-        scheduledDate: z.date().optional(),
-        status: z.enum(["PLANNED", "READY", "SCHEDULED", "PUBLISHED"]).optional(),
+        scheduledFor: z.date().optional(),
+        status: z.enum(["DRAFT", "SCHEDULED", "PUBLISHED", "FAILED", "CANCELLED"]).optional(),
         notes: z.string().optional(),
       })
     )

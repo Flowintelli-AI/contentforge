@@ -64,7 +64,7 @@ export default function ScriptsPage() {
                     <div className="space-y-1">
                       <CardTitle className="text-lg">{script.title}</CardTitle>
                       <p className="text-sm text-muted-foreground">
-                        {truncate(script.idea.rawText, 120)}
+                        {truncate(script.idea.rawIdea, 120)}
                       </p>
                     </div>
                     <Badge variant={status?.variant}>
