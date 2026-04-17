@@ -5,27 +5,6 @@
   "installCommand": "npm install",
   "devCommand": "npm run dev",
   "regions": ["iad1"],
-  "env": {
-    "DATABASE_URL": "@contentforge-database-url",
-    "CLERK_SECRET_KEY": "@contentforge-clerk-secret",
-    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "@contentforge-clerk-publishable-key",
-    "NEXT_PUBLIC_CLERK_SIGN_IN_URL": "/sign-in",
-    "NEXT_PUBLIC_CLERK_SIGN_UP_URL": "/sign-up",
-    "NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL": "/dashboard",
-    "NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL": "/onboarding",
-    "OPENAI_API_KEY": "@contentforge-openai-key",
-    "STRIPE_SECRET_KEY": "@contentforge-stripe-secret",
-    "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "@contentforge-stripe-publishable-key",
-    "STRIPE_WEBHOOK_SECRET": "@contentforge-stripe-webhook-secret",
-    "STRIPE_PRICE_BASIC": "@contentforge-stripe-price-basic",
-    "STRIPE_PRICE_GROWTH": "@contentforge-stripe-price-growth",
-    "STRIPE_PRICE_PREMIUM": "@contentforge-stripe-price-premium",
-    "INSTAGRAM_APP_ID": "@contentforge-instagram-app-id",
-    "INSTAGRAM_APP_SECRET": "@contentforge-instagram-app-secret",
-    "INSTAGRAM_VERIFY_TOKEN": "@contentforge-instagram-verify-token",
-    "INSTAGRAM_GRAPH_VERSION": "v20.0",
-    "NEXTAUTH_SECRET": "@contentforge-nextauth-secret"
-  },
   "headers": [
     {
       "source": "/api/webhooks/(.*)",
