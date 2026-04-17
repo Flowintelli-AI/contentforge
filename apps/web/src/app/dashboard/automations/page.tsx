@@ -23,7 +23,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { MessageSquare, Zap, Plus, Trash2, Power, PowerOff, ExternalLink, Copy } from "lucide-react";
+import { MessageSquare, Zap, Plus, Trash2, Power, PowerOff, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 const PLATFORM_OPTIONS = [
@@ -91,8 +91,8 @@ export default function AutomationsPage() {
 
   const webhookUrl =
     typeof window !== "undefined"
-      ? `${window.location.origin}/api/webhooks/manychat`
-      : "/api/webhooks/manychat";
+      ? `${window.location.origin}/api/webhooks/instagram`
+      : "/api/webhooks/instagram";
 
   const copyWebhookUrl = () => {
     navigator.clipboard.writeText(webhookUrl);
@@ -121,7 +121,7 @@ export default function AutomationsPage() {
         <div>
           <h1 className="text-3xl font-bold">Automation Center</h1>
           <p className="text-muted-foreground mt-1">
-            Comment-keyword DM automations — powered by ManyChat
+            Comment-keyword &amp; DM automations — native Instagram API, no ManyChat required
           </p>
         </div>
         <Button onClick={() => setShowCreate(true)}>
@@ -130,35 +130,31 @@ export default function AutomationsPage() {
         </Button>
       </div>
 
-      {/* Webhook URL card */}
+      {/* Webhook info card */}
       <Card className="border-indigo-200 bg-indigo-50">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base text-indigo-800">
             <MessageSquare className="h-4 w-4" />
-            ManyChat Webhook URL
+            How automations work
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-indigo-700 mb-3">
-            In your ManyChat flow, add an <strong>External Request</strong> block and POST to this
-            URL with <code>keyword</code>, <code>platform</code>, and{" "}
-            <code>subscriber_id</code> in the body.
+            When someone comments your trigger keyword on an Instagram post, ContentForge
+            automatically sends them a DM — no third-party tools needed. Make sure your
+            Instagram account is connected in{" "}
+            <a href="/dashboard/settings" className="underline font-medium">Settings</a>.
           </p>
           <div className="flex items-center gap-2">
             <code className="flex-1 bg-white border border-indigo-200 rounded px-3 py-1.5 text-sm text-indigo-900 truncate">
               {webhookUrl}
             </code>
             <Button variant="outline" size="sm" onClick={copyWebhookUrl}>
-              <Copy className="h-3.5 w-3.5 mr-1" /> Copy
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <a href="https://manychat.com" target="_blank" rel="noreferrer">
-                <ExternalLink className="h-3.5 w-3.5 mr-1" /> ManyChat
-              </a>
+              <Copy className="h-3.5 w-3.5 mr-1" /> Copy URL
             </Button>
           </div>
           <p className="text-xs text-indigo-600 mt-2">
-            Tip: use <code>{"{{first_name}}"}</code> in your DM template to personalise the message.
+            Paste this webhook URL in your Meta App → Webhooks → Instagram. Subscribe to: <code>comments</code>, <code>messages</code>.
           </p>
         </CardContent>
       </Card>

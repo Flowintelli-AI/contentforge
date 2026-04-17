@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/trpc/client";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,26 +19,38 @@ import { Separator } from "@/components/ui/separator";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const WEBHOOK_URL = `${APP_URL}/api/webhooks/instagram`;
 
+const ERROR_MESSAGES: Record<string, string> = {
+  ig_denied: "You cancelled the Instagram connection.",
+  ig_not_configured: "Instagram is not configured on this server yet.",
+  ig_state_mismatch: "Security check failed — please try again.",
+  ig_no_code: "No authorization code received from Instagram.",
+  ig_oauth_failed: "Something went wrong connecting your account. Please try again.",
+};
+
 export function InstagramConnectionCard() {
   const utils = api.useUtils();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const { data: conn, isLoading } = api.instagram.getConnection.useQuery();
 
-  const [form, setForm] = useState({
-    igUserId: "",
-    igUsername: "",
-    accessToken: "",
-    pageId: "",
-  });
-  const [showForm, setShowForm] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [banner, setBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  const save = api.instagram.saveConnection.useMutation({
-    onSuccess: () => {
+  // Read OAuth result from query params, then clean URL
+  useEffect(() => {
+    const connected = searchParams.get("instagram");
+    const error = searchParams.get("error");
+
+    if (connected === "connected") {
+      setBanner({ type: "success", message: "Instagram connected successfully! 🎉" });
       void utils.instagram.getConnection.invalidate();
-      setShowForm(false);
-      setForm({ igUserId: "", igUsername: "", accessToken: "", pageId: "" });
-    },
-  });
+      router.replace("/dashboard/settings");
+    } else if (error && error.startsWith("ig_")) {
+      setBanner({ type: "error", message: ERROR_MESSAGES[error] ?? "Instagram connection failed." });
+      router.replace("/dashboard/settings");
+    }
+  }, [searchParams, router, utils.instagram.getConnection]);
 
   const disconnect = api.instagram.disconnect.useMutation({
     onSuccess: () => void utils.instagram.getConnection.invalidate(),
@@ -61,15 +80,16 @@ export function InstagramConnectionCard() {
             <CardTitle className="flex items-center gap-2">
               <span>Instagram</span>
               {conn ? (
-                <Badge variant="success">Connected</Badge>
+                <Badge variant="secondary" className="bg-green-100 text-green-800">Connected</Badge>
               ) : (
                 <Badge variant="outline">Not Connected</Badge>
               )}
             </CardTitle>
             <CardDescription>
-              Native comment automation & DM workflows — no ManyChat required
+              Native comment automation &amp; DM workflows — no ManyChat required
             </CardDescription>
           </div>
+
           {conn && (
             <div className="flex gap-2">
               {isExpiringSoon && (
@@ -85,9 +105,9 @@ export function InstagramConnectionCard() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setShowForm(true)}
+                asChild
               >
-                Update
+                <a href="/api/auth/instagram">Reconnect</a>
               </Button>
               <Button
                 variant="destructive"
@@ -95,7 +115,7 @@ export function InstagramConnectionCard() {
                 onClick={() => disconnect.mutate()}
                 disabled={disconnect.isPending}
               >
-                Disconnect
+                {disconnect.isPending ? "Disconnecting…" : "Disconnect"}
               </Button>
             </div>
           )}
@@ -103,7 +123,21 @@ export function InstagramConnectionCard() {
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {conn && !showForm && (
+        {/* OAuth result banner */}
+        {banner && (
+          <div
+            className={`rounded-md border p-3 text-sm ${
+              banner.type === "success"
+                ? "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
+                : "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+            }`}
+          >
+            {banner.message}
+          </div>
+        )}
+
+        {/* Connected state */}
+        {conn && (
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-sm">
               <span className="text-muted-foreground w-28">Account</span>
@@ -121,7 +155,7 @@ export function InstagramConnectionCard() {
             <Separator />
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">
-                Meta Webhook URL (paste this in your Meta App → Webhooks)
+                Webhook URL — paste into your Meta App → Webhooks
               </Label>
               <div className="flex gap-2">
                 <Input value={WEBHOOK_URL} readOnly className="font-mono text-xs" />
@@ -136,75 +170,25 @@ export function InstagramConnectionCard() {
           </div>
         )}
 
-        {(!conn || showForm) && (
+        {/* Not connected — OAuth button */}
+        {!conn && (
           <div className="space-y-4">
-            {!conn && (
-              <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
-                <p className="font-medium mb-1">How to connect</p>
-                <ol className="list-decimal list-inside space-y-1 text-xs">
-                  <li>Go to <a href="https://developers.facebook.com/apps" className="underline" target="_blank" rel="noreferrer">Meta for Developers</a> and create an app</li>
-                  <li>Add the Instagram product and generate a long-lived token</li>
-                  <li>Copy your IG User ID and token below</li>
-                  <li>After saving, add the webhook URL to your Meta App</li>
-                </ol>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>IG Username</Label>
-                <Input
-                  placeholder="yourhandle"
-                  value={form.igUsername}
-                  onChange={(e) => setForm((f) => ({ ...f, igUsername: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>IG User ID</Label>
-                <Input
-                  placeholder="17841400000000000"
-                  value={form.igUserId}
-                  onChange={(e) => setForm((f) => ({ ...f, igUserId: e.target.value }))}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Long-Lived Access Token</Label>
-              <Input
-                type="password"
-                placeholder="EAA…"
-                value={form.accessToken}
-                onChange={(e) => setForm((f) => ({ ...f, accessToken: e.target.value }))}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label>Facebook Page ID <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Input
-                placeholder="123456789"
-                value={form.pageId}
-                onChange={(e) => setForm((f) => ({ ...f, pageId: e.target.value }))}
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={() => save.mutate(form)}
-                disabled={save.isPending || !form.igUserId || !form.igUsername || !form.accessToken}
-              >
-                {save.isPending ? "Saving…" : "Save Connection"}
-              </Button>
-              {showForm && (
-                <Button variant="outline" onClick={() => setShowForm(false)}>
-                  Cancel
-                </Button>
-              )}
-            </div>
-
-            {save.error && (
-              <p className="text-sm text-destructive">{save.error.message}</p>
-            )}
+            <p className="text-sm text-muted-foreground">
+              Connect your Instagram Business or Creator account to enable comment
+              automations, keyword-triggered DMs, and subscriber broadcasts.
+            </p>
+            <Button asChild size="lg" className="w-full sm:w-auto">
+              <a href="/api/auth/instagram">
+                <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
+                </svg>
+                Connect with Instagram
+              </a>
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              You&apos;ll be redirected to Instagram to approve access. Requires a
+              Business or Creator account.
+            </p>
           </div>
         )}
       </CardContent>

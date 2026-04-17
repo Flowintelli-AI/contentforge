@@ -32,7 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r flex flex-col">
         {/* Logo */}
-        <div className="px-6 py-5 border-b">
+        <div className="px-6 py-5 border-b" suppressHydrationWarning>
           <span className="text-xl font-bold text-indigo-600">ContentForge</span>
           {data?.creatorProfile && (
             <p className="text-xs text-gray-500 mt-1 truncate">{data.creatorProfile.displayName}</p>
@@ -62,9 +62,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </nav>
 
         {/* User */}
-        <div className="px-4 py-4 border-t flex items-center gap-3">
+        <div className="px-4 py-4 border-t flex items-center gap-3" suppressHydrationWarning>
           <UserButton afterSignOutUrl="/" />
-          <div className="text-sm min-w-0">
+          <div className="text-sm min-w-0" suppressHydrationWarning>
             <p className="font-medium text-gray-900 truncate">{data?.creatorProfile?.displayName ?? "Loading…"}</p>
             <p className="text-xs text-gray-500 truncate">
               {data?.creatorProfile?.postingGoal ?? 0} posts/mo goal

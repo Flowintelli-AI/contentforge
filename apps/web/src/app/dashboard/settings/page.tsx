@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
+import { Suspense } from "react";
 import { InstagramConnectionCard } from "@/components/instagram/connection-card";
 
 export default function SettingsPage() {
@@ -90,7 +91,9 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <InstagramConnectionCard />
+      <Suspense fallback={null}>
+        <InstagramConnectionCard />
+      </Suspense>
     </div>
   );
 }
