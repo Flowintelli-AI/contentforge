@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { upload } from "@vercel/blob/client";
 import { api } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -107,21 +106,45 @@ export default function VideosPage() {
     setUploadProgress(0);
 
     try {
-      const blob = await upload(
-        `videos/${Date.now()}-${pendingFile.name}`,
-        pendingFile,
-        {
-          access: "public",
-          handleUploadUrl: "/api/upload/video",
-          onUploadProgress: ({ percentage }) => {
-            setUploadProgress(Math.round(percentage));
-          },
-        }
-      );
+      const pathname = `videos/${Date.now()}-${pendingFile.name}`;
+
+      // Step 1: get a client token from our server route (same protocol as @vercel/blob/client uses)
+      const tokenRes = await fetch("/api/upload/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "blob.generate-client-token",
+          payload: { pathname, clientPayload: null, multipart: false },
+        }),
+      });
+      if (!tokenRes.ok) throw new Error("Failed to get upload token");
+      const { clientToken } = await tokenRes.json() as { clientToken: string };
+
+      // Step 2: PUT directly to Vercel Blob CDN with XHR so we get progress events
+      const blobUrl = await new Promise<string>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+        });
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const data = JSON.parse(xhr.responseText) as { url: string };
+            resolve(data.url);
+          } else {
+            reject(new Error(`Upload failed: ${xhr.status}`));
+          }
+        });
+        xhr.addEventListener("error", () => reject(new Error("Upload failed: network error")));
+        xhr.open("PUT", `https://vercel.com/api/blob/${pathname}`);
+        xhr.setRequestHeader("Authorization", `Bearer ${clientToken}`);
+        xhr.setRequestHeader("x-content-type", pendingFile.type);
+        xhr.setRequestHeader("x-add-random-suffix", "0");
+        xhr.send(pendingFile);
+      });
 
       await createMutation.mutateAsync({
         title: titleInput.trim(),
-        storagePath: blob.url,
+        storagePath: blobUrl,
         sizeBytes: pendingFile.size,
         mimeType: pendingFile.type,
       });
