@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { upload } from "@vercel/blob/client";
 import { api } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,11 +43,11 @@ function formatBytes(bytes: bigint | number) {
 }
 
 const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  UPLOADING:   { label: "Uploading",   variant: "secondary" },
-  PROCESSING:  { label: "Processing",  variant: "secondary" },
-  READY:       { label: "Ready",       variant: "default"   },
-  FAILED:      { label: "Failed",      variant: "destructive" },
-  ARCHIVED:    { label: "Archived",    variant: "outline"   },
+  UPLOADING:  { label: "Uploading",  variant: "secondary" },
+  PROCESSING: { label: "Processing", variant: "secondary" },
+  READY:      { label: "Ready",      variant: "default" },
+  FAILED:     { label: "Failed",     variant: "destructive" },
+  ARCHIVED:   { label: "Archived",   variant: "outline" },
 };
 
 export default function VideosPage() {
@@ -58,10 +58,11 @@ export default function VideosPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
-  const fileInputId = "video-file-input";
+  // sr-only input: position:absolute 1px — programmatic .click() always works
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
-  const { data: videos = [], isLoading } = api.videos.list.useQuery();
+  const { data: videos = [] } = api.videos.list.useQuery();
 
   const createMutation = api.videos.create.useMutation({
     onSuccess: () => {
@@ -82,7 +83,6 @@ export default function VideosPage() {
 
   const handleFileSelect = (file: File) => {
     setPendingFile(file);
-    // Pre-fill title from filename
     const name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ");
     setTitleInput(name.charAt(0).toUpperCase() + name.slice(1));
     setShowTitleDialog(true);
@@ -97,6 +97,8 @@ export default function VideosPage() {
       toast.error("Please drop a video file");
     }
   }, []);
+
+  const triggerFilePicker = () => fileRef.current?.click();
 
   const handleUpload = async () => {
     if (!pendingFile || !titleInput.trim()) return;
@@ -135,15 +137,30 @@ export default function VideosPage() {
 
   return (
     <div className="space-y-6">
+      {/* sr-only file input — position:absolute 1px, so .click() always works */}
+      <input
+        ref={fileRef}
+        id="video-file-input"
+        type="file"
+        accept="video/*"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFileSelect(file);
+          e.target.value = "";
+        }}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Video Library</h1>
           <p className="text-muted-foreground mt-1">
-            Upload raw footage — AI will create clips for TikTok, Reels & Shorts
+            Upload raw footage — AI will create clips for TikTok, Reels &amp; Shorts
           </p>
         </div>
-        <label htmlFor="video-file-input" className="cursor-pointer">
+        {/* label wrapping button = valid HTML; triggers file picker natively */}
+        <label htmlFor="video-file-input">
           <Button asChild disabled={uploading}>
             <span>
               {uploading ? (
@@ -157,69 +174,39 @@ export default function VideosPage() {
         </label>
       </div>
 
-      {/* Hidden file input — native label wiring, no programmatic .click() */}
-      <input
-        id="video-file-input"
-        type="file"
-        accept="video/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFileSelect(file);
-          // reset so same file can be re-selected
-          e.target.value = "";
-        }}
-      />
-
-      {/* Drop zone (only when no videos) */}
-      {!isLoading && videos.length === 0 && (
-        <label
-          htmlFor="video-file-input"
-          className="cursor-pointer"
+      {/* Drop zone (only when library is empty) */}
+      {videos.length === 0 && !uploading && (
+        <Card
+          className="border-dashed border-2 border-muted-foreground/25 hover:border-primary/50 transition-colors cursor-pointer"
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onClick={triggerFilePicker}
         >
-          <Card
-            className="border-dashed border-2 border-muted-foreground/25 hover:border-primary/50 transition-colors cursor-pointer"
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-          >
-            <CardContent className="py-20 flex flex-col items-center justify-center text-center">
-              {uploading ? (
-                <>
-                  <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
-                  <h3 className="text-lg font-semibold mb-1">Uploading…</h3>
-                  <p className="text-sm text-muted-foreground">{uploadProgress}% complete</p>
-                  <div className="w-64 bg-muted rounded-full h-2 mt-4">
-                    <div
-                      className="bg-primary h-2 rounded-full transition-all"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="rounded-full bg-primary/10 p-5 mb-4">
-                    <Video className="h-10 w-10 text-primary" />
-                  </div>
-                  <h3 className="text-lg font-semibold mb-2">Drop your video here</h3>
-                  <p className="text-muted-foreground text-sm max-w-md mb-4">
-                    Upload long-form videos (up to 500 MB). ContentForge will automatically
-                    repurpose them into short clips optimized for each platform.
-                  </p>
-                  <Button variant="outline" asChild>
-                    <span><Upload className="mr-2 h-4 w-4" /> Choose File</span>
-                  </Button>
-                  <p className="text-xs text-muted-foreground mt-3">
-                    Supports MP4, MOV, AVI, WebM
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </label>
+          <CardContent className="py-20 flex flex-col items-center justify-center text-center">
+            <div className="rounded-full bg-primary/10 p-5 mb-4">
+              <Video className="h-10 w-10 text-primary" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Drop your video here</h3>
+            <p className="text-muted-foreground text-sm max-w-md mb-4">
+              Upload long-form videos (up to 500 MB). ContentForge will automatically
+              repurpose them into short clips optimized for each platform.
+            </p>
+            {/* Stop propagation so card onClick doesn't double-fire */}
+            <Button
+              variant="outline"
+              onClick={(e) => { e.stopPropagation(); triggerFilePicker(); }}
+            >
+              <Upload className="mr-2 h-4 w-4" /> Choose File
+            </Button>
+            <p className="text-xs text-muted-foreground mt-3">
+              Supports MP4, MOV, AVI, WebM
+            </p>
+          </CardContent>
+        </Card>
       )}
 
-      {/* Upload progress bar (when there are already videos) */}
-      {uploading && videos.length > 0 && (
+      {/* Upload progress bar (when library already has videos) */}
+      {uploading && (
         <Card className="border-primary/50">
           <CardContent className="py-4 flex items-center gap-4">
             <Loader2 className="h-5 w-5 text-primary animate-spin shrink-0" />
@@ -238,13 +225,12 @@ export default function VideosPage() {
       )}
 
       {/* Video library grid */}
-      {!isLoading && videos.length > 0 && (
+      {videos.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {videos.map((video) => {
             const statusInfo = STATUS_MAP[video.status] ?? STATUS_MAP.READY;
             return (
               <Card key={video.id} className="overflow-hidden group">
-                {/* Thumbnail / preview */}
                 <div
                   className="relative aspect-video bg-black cursor-pointer"
                   onClick={() => setPlayUrl(video.storagePath)}
@@ -269,7 +255,6 @@ export default function VideosPage() {
 
                 <CardContent className="pt-3 pb-3 space-y-2">
                   <p className="font-medium text-sm truncate">{video.title}</p>
-
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     {video.duration && (
                       <span className="flex items-center gap-1">
@@ -290,19 +275,9 @@ export default function VideosPage() {
                       </span>
                     )}
                   </div>
-
                   <div className="flex gap-2 pt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      asChild
-                    >
-                      <a
-                        href={`https://www.opus.pro/`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
+                    <Button variant="outline" size="sm" className="flex-1" asChild>
+                      <a href="https://www.opus.pro/" target="_blank" rel="noopener noreferrer">
                         <Scissors className="h-3.5 w-3.5 mr-1" /> Create Clips
                         <ExternalLink className="h-3 w-3 ml-1" />
                       </a>
@@ -321,17 +296,16 @@ export default function VideosPage() {
             );
           })}
 
-          {/* Add more card */}
-          <label htmlFor="video-file-input" className="cursor-pointer">
-            <Card
-              className="border-dashed border-2 border-muted-foreground/20 hover:border-primary/40 transition-colors cursor-pointer flex flex-col items-center justify-center min-h-[200px]"
-            >
-              <CardContent className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
-                <Upload className="h-8 w-8" />
-                <span className="text-sm">Upload another video</span>
-              </CardContent>
-            </Card>
-          </label>
+          {/* Add more */}
+          <Card
+            className="border-dashed border-2 border-muted-foreground/20 hover:border-primary/40 transition-colors cursor-pointer flex flex-col items-center justify-center min-h-[200px]"
+            onClick={triggerFilePicker}
+          >
+            <CardContent className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+              <Upload className="h-8 w-8" />
+              <span className="text-sm">Upload another video</span>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -367,10 +341,7 @@ export default function VideosPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold">{integration.name}</CardTitle>
-                <Badge
-                  variant={integration.href ? "default" : "outline"}
-                  className="text-xs"
-                >
+                <Badge variant={integration.href ? "default" : "outline"} className="text-xs">
                   {integration.status}
                 </Badge>
               </div>
@@ -429,7 +400,7 @@ export default function VideosPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm dialog */}
+      {/* Delete confirm */}
       <Dialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <DialogContent>
           <DialogHeader>
@@ -445,7 +416,7 @@ export default function VideosPage() {
               onClick={() => deleteId && deleteMutation.mutate({ id: deleteId })}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {deleteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Delete
             </Button>
           </DialogFooter>
