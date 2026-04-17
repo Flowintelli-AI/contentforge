@@ -182,6 +182,8 @@ model CreatorProfile {
   contentCalendar ContentCalendarItem[]
   automations     Automation[]
   blogPosts       BlogPost[]
+  igConnection    IgConnection?
+  igSubscribers   IgSubscriber[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -459,6 +461,7 @@ model Automation {
   postUrl     String?
 
   actions     AutomationAction[]
+  events      AutomationEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -473,6 +476,68 @@ model AutomationAction {
   template     String   // message template with {{variables}}
   delaySeconds Int?     @default(0)
   metadata     Json?
+}
+
+// ─────────────────────────────────────────────
+// INSTAGRAM NATIVE INTEGRATION
+// ─────────────────────────────────────────────
+
+model IgConnection {
+  id            String   @id @default(cuid())
+  creatorId     String   @unique
+  creator       CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  igUserId      String   // Meta IG Business Account ID (numeric)
+  igUsername    String
+  pageId        String?  // Facebook Page ID linked to the IG Business account
+  accessToken   String   // long-lived user access token (encrypted at rest ideally)
+  tokenExpiry   DateTime?
+  webhookActive Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Every person who has opted in (commented keyword, sent DM keyword, etc.)
+model IgSubscriber {
+  id            String   @id @default(cuid())
+  creatorId     String
+  creator       CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  igUserId      String   // Meta user ID of the subscriber
+  igUsername    String?
+  firstName     String?
+  lastName      String?
+  tags          String[]
+  source        String   // COMMENT_KEYWORD | DM_KEYWORD | STORY_MENTION
+  optedInAt     DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  events        AutomationEvent[]
+
+  @@unique([creatorId, igUserId])
+  @@index([creatorId])
+}
+
+// Audit log of every automation trigger
+model AutomationEvent {
+  id           String   @id @default(cuid())
+  automationId String?
+  automation   Automation?  @relation(fields: [automationId], references: [id])
+  subscriberId String?
+  subscriber   IgSubscriber? @relation(fields: [subscriberId], references: [id])
+
+  eventType    String   // COMMENT_KEYWORD | DM_KEYWORD | STORY_MENTION | BROADCAST
+  keyword      String?
+  commentId    String?  // Meta comment ID
+  messageId    String?  // Meta message ID
+  status       String   @default("SENT") // SENT | FAILED | SKIPPED
+  errorMsg     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([automationId])
+  @@index([subscriberId])
 }
 
 // ─────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { adminRouter } from "./admin";
 import { integrationsRouter } from "./integrations";
 import { billingRouter } from "./billing";
 import { automationsRouter } from "./automations";
+import { instagramRouter } from "./instagram";
 
 export const appRouter = createTRPCRouter({
   ideas: ideasRouter,
@@ -19,6 +20,7 @@ export const appRouter = createTRPCRouter({
   integrations: integrationsRouter,
   billing: billingRouter,
   automations: automationsRouter,
+  instagram: instagramRouter,
 });
 
 export type AppRouter = typeof appRouter;

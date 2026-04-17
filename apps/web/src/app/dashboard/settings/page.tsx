@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
+import { InstagramConnectionCard } from "@/components/instagram/connection-card";
 
 export default function SettingsPage() {
   const { user } = useUser();
@@ -70,7 +71,6 @@ export default function SettingsPage() {
             { name: "Opus Clip", desc: "Video repurposing", connected: false },
             { name: "HeyGen", desc: "AI avatar generation", connected: false },
             { name: "ElevenLabs", desc: "Voice cloning", connected: false },
-            { name: "ManyChat", desc: "Comment automation", connected: false },
           ].map((integration) => (
             <div key={integration.name} className="flex items-center justify-between py-2">
               <div>
@@ -89,6 +89,8 @@ export default function SettingsPage() {
           ))}
         </CardContent>
       </Card>
+
+      <InstagramConnectionCard />
     </div>
   );
 }
