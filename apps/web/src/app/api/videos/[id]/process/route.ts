@@ -7,8 +7,8 @@ import {
   submitShotstackRender,
 } from "@/lib/video-processing";
 
-// Allow up to 60 seconds for transcription + GPT-4o + Shotstack submission
-export const maxDuration = 60;
+// AssemblyAI transcription polls until done — can take several minutes for long videos
+export const maxDuration = 300;
 
 export async function POST(
   _req: Request,

@@ -10,59 +10,87 @@ export interface VideoSegment {
   transcript: string;
 }
 
+interface AssemblyAIUtterance {
+  start: number;
+  end: number;
+  text: string;
+}
+
+interface AssemblyAITranscript {
+  id: string;
+  status: "queued" | "processing" | "completed" | "error";
+  text?: string;
+  error?: string;
+  utterances?: AssemblyAIUtterance[];
+}
+
 /**
- * Downloads a video/audio file from a public URL and transcribes it using Whisper.
- * Max 25 MB — Vercel Blob stores the original upload, so this works for compressed videos.
+ * Transcribes a video via AssemblyAI using the public blob URL.
+ * No size limit — AssemblyAI downloads directly from the URL server-side.
  */
 export async function transcribeVideo(videoUrl: string): Promise<{
   transcript: string;
   segments: { start: number; end: number; text: string }[];
 }> {
-  const response = await fetch(videoUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch video from blob storage: ${response.status}`);
-  }
+  const apiKey = process.env.ASSEMBLYAI_API_KEY;
+  if (!apiKey) throw new Error("ASSEMBLYAI_API_KEY is not set");
 
-  const buffer = await response.arrayBuffer();
-  const sizeMB = buffer.byteLength / (1024 * 1024);
-
-  if (sizeMB > 24.5) {
-    throw new Error(
-      `Video is ${sizeMB.toFixed(1)} MB — Whisper requires files under 25 MB. ` +
-        "Please compress the video before uploading (e.g., HandBrake or Clideo)."
-    );
-  }
-
-  // Detect format from URL or content-type
-  const url = new URL(videoUrl);
-  const ext = url.pathname.split(".").pop()?.toLowerCase() ?? "mp4";
-  const mimeMap: Record<string, string> = {
-    mp4: "video/mp4",
-    webm: "video/webm",
-    mov: "video/quicktime",
-    m4a: "audio/mp4",
-    mp3: "audio/mpeg",
-    wav: "audio/wav",
-  };
-  const mimeType = mimeMap[ext] ?? "video/mp4";
-
-  const file = new File([buffer], `video.${ext}`, { type: mimeType });
-
-  const transcription = await openai.audio.transcriptions.create({
-    file,
-    model: "whisper-1",
-    response_format: "verbose_json",
-    timestamp_granularities: ["segment"],
+  // Submit transcription job
+  const submitRes = await fetch("https://api.assemblyai.com/v2/transcript", {
+    method: "POST",
+    headers: {
+      authorization: apiKey,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      audio_url: videoUrl,
+      speaker_labels: false,
+      auto_chapters: false,
+      punctuate: true,
+      format_text: true,
+    }),
   });
 
-  return {
-    transcript: transcription.text,
-    segments: (transcription.segments ?? []).map((s) => ({
-      start: s.start,
-      end: s.end,
-      text: s.text,
-    })),
-  };
+  if (!submitRes.ok) {
+    const err = await submitRes.text();
+    throw new Error(`AssemblyAI submit error ${submitRes.status}: ${err}`);
+  }
+
+  const { id } = (await submitRes.json()) as { id: string };
+
+  // Poll until done (max 10 min)
+  const pollingUrl = `https://api.assemblyai.com/v2/transcript/${id}`;
+  const deadline = Date.now() + 10 * 60 * 1000;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5000));
+
+    const pollRes = await fetch(pollingUrl, {
+      headers: { authorization: apiKey },
+    });
+    const data = (await pollRes.json()) as AssemblyAITranscript;
+
+    if (data.status === "completed") {
+      const segments = (data.utterances ?? []).map((u) => ({
+        start: u.start / 1000,
+        end: u.end / 1000,
+        text: u.text,
+      }));
+
+      // If no utterances, fall back to full transcript as one segment
+      if (segments.length === 0 && data.text) {
+        segments.push({ start: 0, end: 999, text: data.text });
+      }
+
+      return { transcript: data.text ?? "", segments };
+    }
+
+    if (data.status === "error") {
+      throw new Error(`AssemblyAI transcription failed: ${data.error}`);
+    }
+  }
+
+  throw new Error("AssemblyAI transcription timed out after 10 minutes");
 }
 
 /**
