@@ -1,0 +1,29 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd packages/db && npx prisma generate && cd ../.. && cd apps/web && npm run build",
+  "outputDirectory": "apps/web/.next",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev",
+  "regions": ["iad1"],
+  "env": {
+    "DATABASE_URL": "@contentforge-database-url",
+    "CLERK_SECRET_KEY": "@contentforge-clerk-secret",
+    "OPENAI_API_KEY": "@contentforge-openai-key",
+    "STRIPE_SECRET_KEY": "@contentforge-stripe-secret",
+    "STRIPE_WEBHOOK_SECRET": "@contentforge-stripe-webhook-secret",
+    "POSTIZ_API_KEY": "@contentforge-postiz-key",
+    "POSTIZ_BASE_URL": "@contentforge-postiz-url",
+    "OPUS_CLIP_API_KEY": "@contentforge-opus-key",
+    "HEYGEN_API_KEY": "@contentforge-heygen-key",
+    "ELEVENLABS_API_KEY": "@contentforge-elevenlabs-key",
+    "MANYCHAT_API_KEY": "@contentforge-manychat-key"
+  },
+  "headers": [
+    {
+      "source": "/api/webhooks/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}
