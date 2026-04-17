@@ -138,7 +138,6 @@ export default function VideosPage() {
         xhr.open("PUT", `https://vercel.com/api/blob/${pathname}`);
         xhr.setRequestHeader("Authorization", `Bearer ${clientToken}`);
         xhr.setRequestHeader("x-content-type", pendingFile.type);
-        xhr.setRequestHeader("x-add-random-suffix", "0");
         xhr.send(pendingFile);
       });
 
