@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { api } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -57,11 +57,25 @@ export default function VideosPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [pollEnabled, setPollEnabled] = useState(false);
   // sr-only input: position:absolute 1px — programmatic .click() always works
   const fileRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
-  const { data: videos = [] } = api.videos.list.useQuery();
+
+  // Auto-poll every 8 seconds while any video or clip is still rendering
+  const { data: videos = [], refetch } = api.videos.list.useQuery(undefined, {
+    refetchInterval: pollEnabled ? 8000 : false,
+  });
+
+  // Enable polling whenever processing clips exist
+  useEffect(() => {
+    const hasProcessing = videos.some(
+      (v) => v.status === "PROCESSING" || v.clips.some((c) => c.status === "PROCESSING")
+    );
+    setPollEnabled(hasProcessing);
+  }, [videos]);
 
   const createMutation = api.videos.create.useMutation({
     onSuccess: () => {
@@ -79,6 +93,26 @@ export default function VideosPage() {
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const generateClips = async (videoId: string) => {
+    setProcessingId(videoId);
+    try {
+      const res = await fetch(`/api/videos/${videoId}/process`, { method: "POST" });
+      const data = (await res.json()) as { error?: string; clipsQueued?: number };
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to process video");
+      } else {
+        toast.success(
+          `${data.clipsQueued ?? 10} clips are rendering — check back in a few minutes!`
+        );
+        void refetch();
+      }
+    } catch {
+      toast.error("Network error while processing video");
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   const handleFileSelect = (file: File) => {
     setPendingFile(file);
@@ -298,11 +332,24 @@ export default function VideosPage() {
                     )}
                   </div>
                   <div className="flex gap-2 pt-1">
-                    <Button variant="outline" size="sm" className="flex-1" asChild>
-                      <a href="https://www.opus.pro/" target="_blank" rel="noopener noreferrer">
-                        <Scissors className="h-3.5 w-3.5 mr-1" /> Create Clips
-                        <ExternalLink className="h-3 w-3 ml-1" />
-                      </a>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => generateClips(video.id)}
+                      disabled={video.status === "PROCESSING" || processingId === video.id}
+                    >
+                      {video.status === "PROCESSING" || processingId === video.id ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          Analyzing…
+                        </>
+                      ) : (
+                        <>
+                          <Scissors className="h-3.5 w-3.5 mr-1" />
+                          Generate Clips
+                        </>
+                      )}
                     </Button>
                     <Button
                       variant="ghost"
@@ -313,6 +360,42 @@ export default function VideosPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+
+                  {/* Clips list */}
+                  {video.clips.length > 0 && (
+                    <div className="pt-2 border-t space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {video.clips.length} clip{video.clips.length !== 1 ? "s" : ""}
+                      </p>
+                      {video.clips.slice(0, 4).map((clip) => (
+                        <div key={clip.id} className="flex items-center gap-2 text-xs">
+                          <span className="truncate flex-1">{clip.title}</span>
+                          {clip.status === "READY" && clip.storagePath ? (
+                            <a
+                              href={clip.storagePath}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline shrink-0 flex items-center gap-0.5"
+                            >
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          ) : (
+                            <Badge
+                              variant={clip.status === "FAILED" ? "destructive" : "secondary"}
+                              className="text-[10px] px-1.5 py-0 shrink-0"
+                            >
+                              {clip.status === "PROCESSING" ? "Rendering…" : clip.status}
+                            </Badge>
+                          )}
+                        </div>
+                      ))}
+                      {video.clips.length > 4 && (
+                        <p className="text-xs text-muted-foreground">
+                          +{video.clips.length - 4} more
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -335,12 +418,13 @@ export default function VideosPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           {
-            name: "Opus Clip",
-            desc: "AI-powered video repurposing into short clips",
-            status: "Connect",
-            href: "https://www.opus.pro/",
+            name: "AI Clips",
+            desc: "Auto-repurpose your videos into 10 vertical Reels/Shorts via Whisper + GPT-4o",
+            status: "Built-in",
+            href: null,
             icon: Scissors,
             color: "bg-violet-50 border-violet-200",
+            badge: "default" as const,
           },
           {
             name: "HeyGen",
@@ -349,6 +433,7 @@ export default function VideosPage() {
             href: null,
             icon: Film,
             color: "bg-gray-50",
+            badge: "outline" as const,
           },
           {
             name: "ElevenLabs",
@@ -357,31 +442,23 @@ export default function VideosPage() {
             href: null,
             icon: Video,
             color: "bg-gray-50",
+            badge: "outline" as const,
           },
         ].map((integration) => (
           <Card key={integration.name} className={integration.color}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold">{integration.name}</CardTitle>
-                <Badge variant={integration.href ? "default" : "outline"} className="text-xs">
+                <Badge variant={integration.badge} className="text-xs">
                   {integration.status}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground mb-3">{integration.desc}</p>
-              {integration.href ? (
-                <Button variant="outline" size="sm" className="w-full" asChild>
-                  <a href={integration.href} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                    Open {integration.name}
-                  </a>
-                </Button>
-              ) : (
-                <Button variant="outline" size="sm" className="w-full" disabled>
-                  Coming Soon
-                </Button>
-              )}
+              <Button variant="outline" size="sm" className="w-full" disabled>
+                {integration.status === "Built-in" ? "Active" : "Coming Soon"}
+              </Button>
             </CardContent>
           </Card>
         ))}

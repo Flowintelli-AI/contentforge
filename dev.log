@@ -155,3 +155,30 @@
 @contentforge/web:dev:    Reload env: .env.local
 @contentforge/web:dev:  ✓ Compiled in 475ms (2107 modules)
 @contentforge/web:dev:  GET /dashboard/settings?_rsc=1g2ff 200 in 34ms
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev: prisma:error Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10054, kind: ConnectionReset, message: "An existing connection was forcibly closed by the remote host." }) }
+@contentforge/web:dev:    Reload env: .env.local
+@contentforge/web:dev:  ✓ Compiled in 433ms (1676 modules)
+@contentforge/web:dev:  ✓ Compiled in 94ms (609 modules)
+@contentforge/web:dev:    Reload env: .env.local
+@contentforge/web:dev:  ✓ Compiled in 260ms (1662 modules)
+@contentforge/web:dev:    Reload env: .env.local
+@contentforge/web:dev:  ✓ Compiled in 240ms (1662 modules)
+@contentforge/web:dev:    Reload env: .env.local
+@contentforge/web:dev:  ✓ Compiled in 252ms (1662 modules)
+@contentforge/web:dev:  ✓ Compiled in 303ms (1676 modules)
+@contentforge/web:dev:  ✓ Compiled in 747ms (1451 modules)
+@contentforge/web:dev:  ✓ Compiled in 312ms (1451 modules)
+@contentforge/web:dev:  ✓ Compiled in 633ms (1451 modules)
+@contentforge/web:dev:  ✓ Compiled in 335ms (1451 modules)
+@contentforge/web:dev:  ✓ Compiled in 135ms (609 modules)
+@contentforge/web:dev:  ✓ Compiled in 99ms (609 modules)
