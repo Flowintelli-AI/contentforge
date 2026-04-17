@@ -64,7 +64,13 @@ export const adminRouter = createTRPCRouter({
       const [users, total] = await Promise.all([
         ctx.db.user.findMany({
           where,
-          include: { creatorProfile: true },
+          include: {
+            creatorProfile: {
+              include: {
+                niches: { where: { isPrimary: true }, include: { niche: true }, take: 1 },
+              },
+            },
+          },
           orderBy: { createdAt: "desc" },
           skip: (input.page - 1) * input.limit,
           take: input.limit,

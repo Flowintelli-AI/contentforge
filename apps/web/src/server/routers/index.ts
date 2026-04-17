@@ -6,6 +6,8 @@ import { calendarRouter } from "./calendar";
 import { dashboardRouter } from "./dashboard";
 import { adminRouter } from "./admin";
 import { integrationsRouter } from "./integrations";
+import { billingRouter } from "./billing";
+import { automationsRouter } from "./automations";
 
 export const appRouter = createTRPCRouter({
   ideas: ideasRouter,
@@ -15,6 +17,8 @@ export const appRouter = createTRPCRouter({
   dashboard: dashboardRouter,
   admin: adminRouter,
   integrations: integrationsRouter,
+  billing: billingRouter,
+  automations: automationsRouter,
 });
 
 export type AppRouter = typeof appRouter;

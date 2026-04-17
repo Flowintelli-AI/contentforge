@@ -5,7 +5,24 @@ import superjson from "superjson";
 import { ZodError } from "zod";
 
 export async function createTRPCContext() {
-  const { userId } = await auth();
+  const { userId, sessionClaims } = await auth();
+
+  // Auto-upsert user in DB so Clerk webhook isn't required for local dev
+  if (userId) {
+    const email =
+      (sessionClaims?.email as string | undefined) ??
+      `${userId}@placeholder.contentforge`;
+    const name =
+      (sessionClaims?.fullName as string | undefined) ??
+      (sessionClaims?.firstName as string | undefined) ??
+      email.split("@")[0];
+
+    await db.user.upsert({
+      where: { clerkId: userId },
+      create: { clerkId: userId, email, name },
+      update: {},
+    });
+  }
 
   return { userId, db };
 }

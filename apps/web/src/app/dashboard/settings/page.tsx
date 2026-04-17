@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useUser } from "@clerk/nextjs";
+import Link from "next/link";
 
 export default function SettingsPage() {
   const { user } = useUser();
@@ -48,13 +49,14 @@ export default function SettingsPage() {
         <CardContent>
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-medium">Current Plan</p>
-              <p className="text-sm text-muted-foreground">Free Trial — 14 days remaining</p>
+              <p className="font-medium">Manage your plan and billing details</p>
+              <p className="text-sm text-muted-foreground">View your current subscription, upgrade, or download invoices.</p>
             </div>
-            <Badge variant="warning">Free Trial</Badge>
           </div>
           <Separator className="my-4" />
-          <Button>Upgrade to Growth</Button>
+          <Button asChild>
+            <Link href="/dashboard/settings/billing">Go to Billing</Link>
+          </Button>
         </CardContent>
       </Card>
 

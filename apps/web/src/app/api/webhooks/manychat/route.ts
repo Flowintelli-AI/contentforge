@@ -1,40 +1,36 @@
-// ─── ManyChat webhook handler ─────────────────────────────────────────────────
-// ManyChat sends a POST when a comment keyword is triggered.
-// Configure external request URL in ManyChat flow builder.
+// ─── ManyChat External Request webhook ────────────────────────────────────────
+// In ManyChat flow builder, add an "External Request" block and point it here.
+// ManyChat POSTs subscriber data when a keyword comment fires; we look up the
+// matching DB automation and return a v2 message for ManyChat to send as a DM.
+//
+// Expected POST body: { subscriber_id, first_name, keyword, platform }
+// Response format:    { version: "v2", content: { messages: [{ type: "text", text }] } }
+//
+// Optional: add ?token=<MANYCHAT_WEBHOOK_TOKEN> to the URL in ManyChat for auth.
 
 import { NextResponse } from "next/server";
+import { db } from "@contentforge/db";
 import { createLogger } from "@/lib/integrations/shared/logger";
-import { manyChatService } from "@/lib/integrations/manychat/service";
 
 const logger = createLogger("manychat-webhook");
 
-interface ManyChatWebhookPayload {
-  subscriber_id: string;
-  first_name?: string;
-  last_name?: string;
-  /** Custom field from the flow — maps to automation trigger keyword */
-  keyword?: string;
-  platform?: "INSTAGRAM" | "FACEBOOK";
-  page_id?: string;
-}
-
-const KEYWORD_FLOWS: Record<string, { flowNs: string; tag: string }> = {
-  GUIDE: {
-    flowNs: process.env.MANYCHAT_FLOW_GUIDE ?? "",
-    tag: "requested-guide",
-  },
-  LINK: {
-    flowNs: process.env.MANYCHAT_FLOW_LINK ?? "",
-    tag: "requested-link",
-  },
-  PLAN: {
-    flowNs: process.env.MANYCHAT_FLOW_PLAN ?? "",
-    tag: "requested-plan",
-  },
+const PLATFORM_MAP: Record<string, string> = {
+  instagram: "INSTAGRAM",
+  facebook: "FACEBOOK",
+  tiktok: "TIKTOK",
+  twitter: "TWITTER_X",
+  twitter_x: "TWITTER_X",
+  youtube: "YOUTUBE",
+  linkedin: "LINKEDIN",
 };
 
+/** ManyChat requires HTTP 200 even for logic errors — wrap in a text DM. */
+function dmReply(text: string) {
+  return NextResponse.json({ version: "v2", content: { messages: [{ type: "text", text }] } });
+}
+
 export async function POST(req: Request) {
-  // Verify secret token in query string (?token=...)
+  // Optional token auth
   const url = new URL(req.url);
   const token = url.searchParams.get("token");
   if (process.env.MANYCHAT_WEBHOOK_TOKEN && token !== process.env.MANYCHAT_WEBHOOK_TOKEN) {
@@ -42,47 +38,50 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let payload: ManyChatWebhookPayload;
+  let body: Record<string, string>;
   try {
-    payload = (await req.json()) as ManyChatWebhookPayload;
+    body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  logger.info("Received webhook", {
-    subscriberId: payload.subscriber_id,
-    keyword: payload.keyword,
+  const { subscriber_id, first_name = "there", keyword, platform } = body;
+  logger.info("Received webhook", { subscriber_id, keyword, platform });
+
+  if (!keyword || !platform) {
+    return dmReply("Missing keyword or platform — check your ManyChat flow setup.");
+  }
+
+  const platformKey = PLATFORM_MAP[platform.toLowerCase()];
+  if (!platformKey) return dmReply(`Unsupported platform: ${platform}`);
+
+  // Look up the active automation for this keyword + platform
+  const automation = await db.automation.findFirst({
+    where: {
+      triggerKeyword: keyword.toUpperCase(),
+      platform: platformKey as any,
+      isActive: true,
+    },
+    include: {
+      actions: {
+        where: { actionType: "SEND_DM" },
+        orderBy: { order: "asc" },
+        take: 1,
+      },
+    },
   });
 
-  const keyword = payload.keyword?.toUpperCase();
-  const flow = keyword ? KEYWORD_FLOWS[keyword] : undefined;
-
-  if (!flow) {
-    logger.warn("Unknown keyword", { keyword });
-    return NextResponse.json({ received: true });
+  if (!automation || automation.actions.length === 0) {
+    logger.warn("No active automation found", { keyword, platformKey });
+    return dmReply("No active automation configured for this keyword.");
   }
 
-  try {
-    // Trigger the ManyChat flow + tag subscriber in parallel
-    // Note: Automation triggers are tracked via the Automation/AutomationAction models.
-    // Webhook-level logging is handled via structured logger below.
-    await Promise.all([
-      flow.flowNs
-        ? manyChatService.triggerFlow({ subscriberId: payload.subscriber_id, flowNs: flow.flowNs })
-        : Promise.resolve(),
-      manyChatService.tagSubscriber({ subscriberId: payload.subscriber_id, tagName: flow.tag }),
-    ]);
+  // Interpolate {{variables}} in the template
+  const text = automation.actions[0].template
+    .replace(/\{\{first_name\}\}/gi, first_name)
+    .replace(/\{\{subscriber_id\}\}/gi, subscriber_id ?? "")
+    .replace(/\{\{keyword\}\}/gi, keyword);
 
-    logger.info("Automation triggered", {
-      keyword,
-      subscriberId: payload.subscriber_id,
-      platform: payload.platform ?? "INSTAGRAM",
-      flowNs: flow.flowNs,
-    });
-  } catch (err) {
-    logger.error("Automation failed", { err, keyword });
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
-  }
-
-  return NextResponse.json({ received: true });
+  logger.info("Automation matched", { automationId: automation.id, keyword });
+  return dmReply(text);
 }

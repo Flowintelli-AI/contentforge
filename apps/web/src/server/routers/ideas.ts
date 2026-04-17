@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure, adminProcedure } from "@/server/trpc";
 import { IdeaStatus, ContentPillarType } from "@prisma/client";
 import { generateRefinedIdea } from "@/lib/ai/agents/contentStrategist";
+import { generateScript } from "@/lib/ai/agents/scriptWriter";
 import { TRPCError } from "@trpc/server";
 
 export const ideasRouter = createTRPCRouter({
@@ -90,8 +91,60 @@ export const ideasRouter = createTRPCRouter({
         },
       });
 
-      // TODO: enqueue background job for script generation
-      // await jobs.enqueue("generate-script", { ideaId: idea.id });
+      // Auto-generate a structured script immediately
+      try {
+        const primaryNiche = profile.niches[0]?.niche?.name;
+        const scriptData = await generateScript(input.rawIdea, refinedIdea, primaryNiche);
+
+        const scriptBody = [
+          `🎣 HOOK\n${scriptData.hook}`,
+          `😤 PAIN POINT\n${scriptData.painPoint}`,
+          `🏆 AUTHORITY\n${scriptData.authority}`,
+          `💡 SOLUTION\n${scriptData.solution}`,
+          `📣 CALL TO ACTION\n${scriptData.callToAction}`,
+        ].join("\n\n");
+
+        const script = await ctx.db.script.create({
+          data: {
+            ideaId: idea.id,
+            title: refinedIdea.slice(0, 100),
+            hook: scriptData.hook,
+            painPoint: scriptData.painPoint,
+            authority: scriptData.authority,
+            solution: scriptData.solution,
+            callToAction: scriptData.callToAction,
+            fullScript: scriptBody,
+            estimatedDuration: scriptData.estimatedDurationSeconds,
+            status: "DRAFT",
+          },
+        });
+
+        await ctx.db.scriptVersion.create({
+          data: {
+            scriptId: script.id,
+            version: 1,
+            snapshot: {
+              hook: scriptData.hook,
+              painPoint: scriptData.painPoint,
+              authority: scriptData.authority,
+              solution: scriptData.solution,
+              callToAction: scriptData.callToAction,
+              hashtags: scriptData.hashtags,
+              caption: scriptData.caption,
+              fullScript: scriptBody,
+            },
+          },
+        });
+
+        // Mark idea as scripted
+        await ctx.db.contentIdea.update({
+          where: { id: idea.id },
+          data: { status: IdeaStatus.SCRIPTED },
+        });
+      } catch (err) {
+        // Script generation failure is non-fatal — idea still saved
+        console.error("[script-gen] failed:", err);
+      }
 
       return idea;
     }),
