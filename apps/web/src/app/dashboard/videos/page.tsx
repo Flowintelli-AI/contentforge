@@ -59,6 +59,7 @@ export default function VideosPage() {
   const [playUrl, setPlayUrl] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(false);
+  const [clipsDialogVideoId, setClipsDialogVideoId] = useState<string | null>(null);
   // sr-only input: position:absolute 1px — programmatic .click() always works
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -387,9 +388,12 @@ export default function VideosPage() {
                         </div>
                       ))}
                       {video.clips.length > 4 && (
-                        <p className="text-xs text-muted-foreground">
-                          +{video.clips.length - 4} more
-                        </p>
+                        <button
+                          className="text-xs text-primary hover:underline text-left"
+                          onClick={() => setClipsDialogVideoId(video.id)}
+                        >
+                          +{video.clips.length - 4} more — view all
+                        </button>
                       )}
                     </div>
                   )}
@@ -516,6 +520,47 @@ export default function VideosPage() {
               Delete
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* All clips dialog */}
+      <Dialog open={!!clipsDialogVideoId} onOpenChange={(o) => !o && setClipsDialogVideoId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {(() => {
+                const v = videos.find((v) => v.id === clipsDialogVideoId);
+                return v ? `${v.clips.length} clips — ${v.title}` : "Clips";
+              })()}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+            {videos
+              .find((v) => v.id === clipsDialogVideoId)
+              ?.clips.map((clip, i) => (
+                <div key={clip.id} className="flex items-center gap-3 text-sm py-1.5 border-b last:border-0">
+                  <span className="text-muted-foreground w-6 shrink-0 text-right">{i + 1}.</span>
+                  <span className="truncate flex-1">{clip.title}</span>
+                  {clip.status === "READY" && clip.storagePath ? (
+                    <a
+                      href={clip.storagePath}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline shrink-0 flex items-center gap-1 text-xs"
+                    >
+                      <ExternalLink className="h-3 w-3" /> View
+                    </a>
+                  ) : (
+                    <Badge
+                      variant={clip.status === "FAILED" ? "destructive" : "secondary"}
+                      className="text-[10px] px-1.5 py-0 shrink-0"
+                    >
+                      {clip.status === "PROCESSING" ? "Rendering…" : clip.status}
+                    </Badge>
+                  )}
+                </div>
+              ))}
+          </div>
         </DialogContent>
       </Dialog>
 
