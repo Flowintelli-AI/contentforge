@@ -97,7 +97,7 @@ async function performVoiceClone(
   elevenKey: string
 ) {
   try {
-    const SAMPLE_BYTES = 20 * 1024 * 1024; // 20 MB
+    const SAMPLE_BYTES = 10 * 1024 * 1024; // 10 MB — ElevenLabs IVC limit is 11 MB
 
     const headRes = await fetch(storagePath, { method: "HEAD" });
     const totalBytes = parseInt(headRes.headers.get("content-length") ?? "0", 10);
