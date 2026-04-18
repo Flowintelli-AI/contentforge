@@ -26,8 +26,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       sizeBytes: number;
     };
 
-    if (!ALLOWED_TYPES.includes(contentType)) {
-      return NextResponse.json({ error: "Invalid file type" }, { status: 400 });
+    console.log("[upload/video] filename:", filename, "contentType:", contentType, "sizeBytes:", sizeBytes);
+    if (!ALLOWED_TYPES.includes(contentType) && !contentType.startsWith("video/")) {
+      return NextResponse.json({ error: `Invalid file type: ${contentType}` }, { status: 400 });
     }
     if (sizeBytes > 500 * 1024 * 1024) {
       return NextResponse.json({ error: "File too large (max 500 MB)" }, { status: 400 });
