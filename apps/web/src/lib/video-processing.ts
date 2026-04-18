@@ -53,6 +53,19 @@ export async function selectBestSegments(
   segments: { start: number; end: number; text: string }[],
   count = 10
 ): Promise<VideoSegment[]> {
+  // GPT-4o has 128K token limit (~4 chars/token). Cap transcript at ~80K chars
+  // and limit segments to 500 entries to stay well under the limit.
+  const MAX_TRANSCRIPT_CHARS = 80_000;
+  const MAX_SEGMENTS = 500;
+  const truncatedTranscript =
+    transcript.length > MAX_TRANSCRIPT_CHARS
+      ? transcript.slice(0, MAX_TRANSCRIPT_CHARS) + "\n[transcript truncated for length]"
+      : transcript;
+  const sampledSegments =
+    segments.length > MAX_SEGMENTS
+      ? segments.filter((_, i) => i % Math.ceil(segments.length / MAX_SEGMENTS) === 0)
+      : segments;
+
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     response_format: { type: "json_object" },
@@ -70,8 +83,8 @@ export async function selectBestSegments(
       {
         role: "user",
         content: [
-          `Full transcript:\n${transcript}`,
-          `\nTimestamped segments (seconds):\n${JSON.stringify(segments, null, 2)}`,
+          `Full transcript:\n${truncatedTranscript}`,
+          `\nTimestamped segments (seconds):\n${JSON.stringify(sampledSegments, null, 2)}`,
           `\nReturn EXACTLY ${count} clips as JSON:`,
           `{"clips":[{"title":"Short catchy title (max 60 chars)","hook":"Opening sentence that grabs attention","startTime":0.0,"endTime":28.5,"transcript":"Verbatim quote from this segment"}]}`,
           `Rules: startTime and endTime must match real timestamps from the segments above. Duration 15–30s.`,
