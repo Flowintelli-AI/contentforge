@@ -13,7 +13,7 @@ const r2 = new S3Client({
 });
 
 const BUCKET = "contentforge-videos";
-const ALLOWED_TYPES = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/mpeg"];
+const ALLOWED_EXTENSIONS = [".mp4", ".mov", ".avi", ".webm", ".mpeg", ".mpg", ".mpeg4", ".m4v", ".3gp", ".mkv"];
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const { userId } = await auth();
@@ -27,8 +27,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     };
 
     console.log("[upload/video] filename:", filename, "contentType:", contentType, "sizeBytes:", sizeBytes);
-    if (!ALLOWED_TYPES.includes(contentType) && !contentType.startsWith("video/")) {
-      return NextResponse.json({ error: `Invalid file type: ${contentType}` }, { status: 400 });
+    const ext = filename.toLowerCase().slice(filename.lastIndexOf("."));
+    if (!contentType.startsWith("video/") && !ALLOWED_EXTENSIONS.includes(ext)) {
+      return NextResponse.json({ error: `Invalid file type: ${contentType} (${ext})` }, { status: 400 });
     }
     if (sizeBytes > 500 * 1024 * 1024) {
       return NextResponse.json({ error: "File too large (max 500 MB)" }, { status: 400 });
