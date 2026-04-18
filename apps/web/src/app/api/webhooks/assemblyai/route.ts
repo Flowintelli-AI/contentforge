@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import {
   selectBestSegments,
   submitShotstackRender,
-  cloneVoiceFromVideo,
   generateAndUploadVoiceover,
 } from "@/lib/video-processing";
 
@@ -131,24 +130,21 @@ export async function POST(req: Request) {
       10
     );
 
-    // ElevenLabs: clone voice (skip if already done, or fall back to default)
-    let voiceId = video.clonedVoiceId ?? null;
-    if (!voiceId) {
-      try {
-        voiceId = await cloneVoiceFromVideo(video.storagePath, videoId);
-        await db.uploadedVideo.update({
-          where: { id: videoId },
-          data: { clonedVoiceId: voiceId },
-        });
-      } catch (err) {
-        console.warn(
-          `[pipeline] Voice clone failed, falling back to default narrator:`,
-          err
-        );
-        // Fall back to ElevenLabs default Rachel voice
-        voiceId = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
-      }
-    }
+    // ElevenLabs voice selection:
+    // 1. Use voice already cloned for this video (stored in DB)
+    // 2. Use ELEVENLABS_VOICE_ID env var (pre-created voice clone from ElevenLabs dashboard)
+    // 3. Fall back to Rachel (default ElevenLabs voice)
+    //
+    // NOTE: Runtime cloning is skipped here because the webhook runs in a 60s
+    // serverless function — downloading + uploading a 5-min video reliably exceeds
+    // that limit. Create your voice clone at elevenlabs.io, copy the Voice ID,
+    // and set ELEVENLABS_VOICE_ID in Vercel env vars.
+    const voiceId =
+      video.clonedVoiceId ??
+      process.env.ELEVENLABS_VOICE_ID ??
+      "21m00Tcm4TlvDq8ikWAM"; // Rachel fallback
+
+    console.log(`[pipeline] Using voice ID: ${voiceId} for video ${videoId}`);
 
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ??

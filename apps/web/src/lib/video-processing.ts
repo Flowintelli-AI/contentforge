@@ -55,17 +55,6 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * Wraps the last word of a string in a yellow <span> for emphasis.
- * Creates visual hierarchy without complex markup.
- */
-function emphasizeLast(text: string): string {
-  const words = escapeHtml(text).split(" ");
-  if (words.length <= 1) return escapeHtml(text);
-  const lastWord = words.pop()!;
-  return `${words.join(" ")} <span class="em">${lastWord}</span>`;
-}
-
 // ─── AssemblyAI ───────────────────────────────────────────────────────────────
 
 export async function submitTranscriptionJob(
@@ -312,98 +301,44 @@ export async function selectBestSegments(
 // ─── Shotstack ────────────────────────────────────────────────────────────────
 
 /**
- * Builds a section-based caption track for a 9:16 reel.
- * Shows 4 timed text sections across the clip with visual variety.
+ * Builds word-group captions timed evenly across the clip duration.
+ * Groups the narration into 3-word phrases, each shown sequentially.
+ * Alternates white and yellow text for visual rhythm.
+ * Style: Impact font with black outline — the standard viral reel look.
  */
 function buildCaptionTrack(rs: ReelScript, duration: number) {
-  const baseCss = [
-    "* { box-sizing: border-box; margin: 0; padding: 0; }",
-    "body { width: 1080px; display: flex; flex-direction: column;",
-    "  align-items: center; justify-content: center; }",
-    ".em { color: #FFE135; }",
-    ".card { width: 100%; padding: 0 60px; text-align: center;",
-    "  font-family: 'Montserrat', sans-serif; line-height: 1.2; }",
-  ].join(" ");
+  const words = rs.narrationScript.trim().split(/\s+/).filter(Boolean);
+  const WORDS_PER_GROUP = 3;
+  const groups: string[] = [];
 
-  // HOOK (0% → 28%) — White uppercase, very large, bold
-  const hookSection = {
-    asset: {
-      type: "html",
-      html: `<div class="card"><p class="hook">${emphasizeLast(rs.hook)}</p></div>`,
-      css:
-        baseCss +
-        " .hook { font-size: 64px; font-weight: 900; color: #FFFFFF;" +
-        " text-transform: uppercase; letter-spacing: -1px;" +
-        " text-shadow: 3px 3px 10px rgba(0,0,0,0.95); }",
-      width: 1080,
-      height: 380,
-    },
-    start: 0,
-    length: duration * 0.28,
-    position: "bottom",
-    offset: { x: 0, y: 0.22 },
-    transition: { in: "fade", out: "fade" },
-  };
+  for (let i = 0; i < words.length; i += WORDS_PER_GROUP) {
+    groups.push(words.slice(i, i + WORDS_PER_GROUP).join(" ").toUpperCase());
+  }
 
-  // PAIN POINT (28% → 52%) — Yellow, slightly smaller
-  const painSection = {
-    asset: {
-      type: "html",
-      html: `<div class="card"><p class="pain">${escapeHtml(rs.painPoint)}</p></div>`,
-      css:
-        baseCss +
-        " .pain { font-size: 48px; font-weight: 700; color: #FFE135;" +
-        " text-shadow: 2px 2px 8px rgba(0,0,0,0.9); }",
-      width: 1080,
-      height: 320,
-    },
-    start: duration * 0.28,
-    length: duration * 0.24,
-    position: "bottom",
-    offset: { x: 0, y: 0.22 },
-    transition: { in: "fade", out: "fade" },
-  };
+  if (groups.length === 0) return [];
 
-  // SOLUTION (52% → 80%) — White with semi-transparent background pill
-  const solutionSection = {
-    asset: {
-      type: "html",
-      html: `<div class="card"><p class="sol">${emphasizeLast(rs.solution)}</p></div>`,
-      css:
-        baseCss +
-        " .card { background: rgba(0,0,0,0.55); border-radius: 24px; padding: 28px 60px; }" +
-        " .sol { font-size: 44px; font-weight: 700; color: #FFFFFF;" +
-        " text-shadow: 1px 1px 4px rgba(0,0,0,0.8); }",
-      width: 1080,
-      height: 340,
-    },
-    start: duration * 0.52,
-    length: duration * 0.28,
-    position: "bottom",
-    offset: { x: 0, y: 0.22 },
-    transition: { in: "fade", out: "fade" },
-  };
+  const groupDuration = duration / groups.length;
 
-  // CTA (80% → 100%) — Red/coral, bold action
-  const ctaSection = {
-    asset: {
-      type: "html",
-      html: `<div class="card"><p class="cta">👉 ${escapeHtml(rs.cta)}</p></div>`,
-      css:
-        baseCss +
-        " .cta { font-size: 50px; font-weight: 900; color: #FF4C4C;" +
-        " text-shadow: 2px 2px 8px rgba(0,0,0,0.9); letter-spacing: -0.5px; }",
-      width: 1080,
-      height: 280,
-    },
-    start: duration * 0.80,
-    length: duration * 0.20,
-    position: "bottom",
-    offset: { x: 0, y: 0.22 },
-    transition: { in: "fade", out: "fade" },
-  };
+  return groups.map((text, i) => {
+    // Alternate yellow every 3rd group for rhythm; CTA group always yellow
+    const isYellow = i % 3 === 2 || i === groups.length - 1;
+    const color = isYellow ? "#FFE135" : "#FFFFFF";
 
-  return [hookSection, painSection, solutionSection, ctaSection];
+    return {
+      asset: {
+        type: "html",
+        html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:92px;font-weight:900;color:${color};-webkit-text-stroke:5px #000000;text-align:center;padding:0 48px;line-height:1.1;letter-spacing:2px;margin:0;word-break:break-word;">${escapeHtml(text)}</p>`,
+        width: 1080,
+        height: 220,
+        background: "transparent",
+      },
+      start: i * groupDuration,
+      length: groupDuration,
+      position: "bottom",
+      offset: { x: 0, y: 0.12 },
+      transition: { in: "fade", out: "fade" },
+    };
+  });
 }
 
 /**
