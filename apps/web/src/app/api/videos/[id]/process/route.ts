@@ -37,19 +37,20 @@ export async function POST(
   try {
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
-    // Pass videoId as query param so the webhook knows which video to update
     const webhookUrl = `${appUrl}/api/webhooks/assemblyai?videoId=${video.id}`;
 
-    // Submit to AssemblyAI and return immediately — webhook handles the rest
+    console.log(`[process] submitting transcription for video=${video.id} storagePath=${video.storagePath}`);
     await submitTranscriptionJob(video.storagePath, webhookUrl);
+    console.log(`[process] ✅ transcription submitted for video=${video.id}`);
 
     return NextResponse.json({ success: true, message: "Transcription started. Clips will appear shortly." });
   } catch (err) {
+    const message = err instanceof Error ? err.message : "Processing failed";
+    console.error(`[process] ❌ error for video=${video.id}: ${message}`);
     await db.uploadedVideo.update({
       where: { id: video.id },
       data: { status: "READY" },
     });
-    const message = err instanceof Error ? err.message : "Processing failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
