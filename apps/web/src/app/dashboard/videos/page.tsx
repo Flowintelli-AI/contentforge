@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { put } from "@vercel/blob/client";
 import { api } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -141,31 +140,41 @@ export default function VideosPage() {
     setUploadProgress(0);
 
     try {
-      const pathname = `videos/${Date.now()}-${pendingFile.name.replace(/\s+/g, "-")}`;
-
-      // Step 1: get a client token from our server route
+      // Step 1: get presigned URL from our server
       const tokenRes = await fetch("/api/upload/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "blob.generate-client-token",
-          payload: { pathname, clientPayload: null, multipart: false },
+          filename: pendingFile.name,
+          contentType: pendingFile.type,
+          sizeBytes: pendingFile.size,
         }),
       });
-      if (!tokenRes.ok) throw new Error("Failed to get upload token");
-      const { clientToken } = await tokenRes.json() as { clientToken: string };
+      if (!tokenRes.ok) throw new Error("Failed to get upload URL");
+      const { presignedUrl, publicUrl } = await tokenRes.json() as {
+        presignedUrl: string;
+        publicUrl: string;
+      };
 
-      // Step 2: use @vercel/blob/client put() — handles correct upload URL + public access
-      const blob = await put(pathname, pendingFile, {
-        access: "public",
-        token: clientToken,
-        contentType: pendingFile.type,
-        onUploadProgress: ({ percentage }) => setUploadProgress(Math.round(percentage)),
+      // Step 2: upload directly to R2 with progress tracking
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+        });
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed: ${xhr.status}`));
+        });
+        xhr.addEventListener("error", () => reject(new Error("Upload failed: network error")));
+        xhr.open("PUT", presignedUrl);
+        xhr.setRequestHeader("Content-Type", pendingFile.type);
+        xhr.send(pendingFile);
       });
 
       await createMutation.mutateAsync({
         title: titleInput.trim(),
-        storagePath: blob.url,
+        storagePath: publicUrl,
         sizeBytes: pendingFile.size,
         mimeType: pendingFile.type,
       });
