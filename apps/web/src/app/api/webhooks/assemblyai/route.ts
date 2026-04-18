@@ -36,11 +36,18 @@ export async function POST(req: Request) {
   console.log(`AssemblyAI webhook for video ${videoId}: status=${payload.status}, id=${payload.transcript_id}`);
 
   if (payload.status === "error") {
+    // Fetch transcript to get the actual error reason
+    const apiKey = process.env.ASSEMBLYAI_API_KEY;
+    const errRes = await fetch(
+      `https://api.assemblyai.com/v2/transcript/${payload.transcript_id}`,
+      { headers: { authorization: apiKey! } }
+    );
+    const errData = errRes.ok ? await errRes.json() : {};
+    console.error(`AssemblyAI error for video ${videoId}:`, errData.error ?? "unknown error", "| url:", errData.audio_url);
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { status: "READY" },
     });
-    console.error(`AssemblyAI error for video ${videoId}`);
     return NextResponse.json({ ok: true });
   }
 
