@@ -48,6 +48,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Idempotency: if clips already exist for this video, skip (webhook may fire multiple times)
+  const existingClips = await db.repurposedClip.count({ where: { videoId } });
+  if (existingClips > 0) {
+    console.log(`Video ${videoId} already has ${existingClips} clips, skipping duplicate webhook`);
+    return NextResponse.json({ ok: true });
+  }
+
   // Fetch the full transcript from AssemblyAI (webhook only sends id + status)
   const apiKey = process.env.ASSEMBLYAI_API_KEY;
   const transcriptRes = await fetch(
