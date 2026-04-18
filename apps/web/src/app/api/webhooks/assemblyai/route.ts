@@ -4,6 +4,7 @@ import {
   selectBestSegments,
   submitShotstackRender,
   generateAndUploadVoiceover,
+  fetchPexelsBroll,
 } from "@/lib/video-processing";
 
 export const maxDuration = 60;
@@ -171,13 +172,24 @@ export async function POST(req: Request) {
           console.warn(`[pipeline] Voiceover failed for clip ${idx}:`, err);
         }
 
-        // Submit Shotstack render (voiceover optional — falls back to original audio)
+        // Fetch Pexels B-roll for this clip (parallel with other clips)
+        let brollUrl: string | null = null;
+        if (seg.brollKeywords?.length) {
+          const clipDuration = Math.min(27, Math.max(20, seg.endTime - seg.startTime));
+          brollUrl = await fetchPexelsBroll(seg.brollKeywords, clipDuration).catch((err) => {
+            console.warn(`[broll] Failed for clip ${idx}:`, err);
+            return null;
+          });
+        }
+
+        // Submit Shotstack render (voiceover + B-roll optional)
         const renderId = await submitShotstackRender(
           video.storagePath,
           seg,
           shotstackWebhook,
           voiceoverUrl,
-          wordTimings
+          wordTimings,
+          brollUrl ?? undefined
         );
 
         return db.repurposedClip.create({

@@ -43,6 +43,7 @@ export interface VideoSegment {
   startTime: number;
   endTime: number;
   transcript: string;
+  brollKeywords: string[]; // 3-5 keywords for Pexels B-roll search
 }
 
 export interface WordTiming {
@@ -262,6 +263,70 @@ export async function generateAndUploadVoiceover(
   return { url, wordTimings };
 }
 
+// ─── Pexels B-roll ────────────────────────────────────────────────────────────
+
+interface PexelsVideo {
+  duration: number;
+  video_files: Array<{ quality: string; width: number; height: number; link: string }>;
+}
+
+/**
+ * Searches Pexels for a portrait B-roll clip matching the given keywords.
+ * Requires PEXELS_API_KEY env var. Returns a direct video URL or null.
+ */
+export async function fetchPexelsBroll(
+  keywords: string[],
+  minDurationSeconds: number
+): Promise<string | null> {
+  const apiKey = process.env.PEXELS_API_KEY;
+  if (!apiKey) {
+    console.warn("[broll] PEXELS_API_KEY not set — skipping B-roll");
+    return null;
+  }
+
+  const query = keywords.slice(0, 3).join(" ");
+  console.log(`[broll] Searching Pexels for "${query}" (min ${minDurationSeconds}s)`);
+
+  const res = await fetch(
+    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=8&orientation=portrait`,
+    { headers: { Authorization: apiKey } }
+  );
+
+  if (!res.ok) {
+    console.warn(`[broll] Pexels search failed: ${res.status}`);
+    return null;
+  }
+
+  const data = (await res.json()) as { videos: PexelsVideo[] };
+
+  for (const video of data.videos) {
+    if (video.duration < minDurationSeconds) continue;
+
+    // Prefer portrait HD/SD, fall back to any portrait file
+    const file = video.video_files
+      .filter((f) => f.height > f.width) // portrait only
+      .sort((a, b) => {
+        const score = (q: string) => (q === "hd" ? 2 : q === "sd" ? 1 : 0);
+        return score(b.quality) - score(a.quality);
+      })[0];
+
+    if (file) {
+      console.log(`[broll] ✅ Found: ${file.quality} ${file.width}x${file.height}`);
+      return file.link;
+    }
+  }
+
+  // Retry without portrait filter if nothing found
+  const anyFile = data.videos[0]?.video_files.sort((a, b) => b.width - a.width)[0];
+  if (anyFile) {
+    console.log(`[broll] ✅ Fallback (non-portrait): ${anyFile.link.slice(0, 60)}...`);
+    return anyFile.link;
+  }
+
+  console.warn(`[broll] No suitable clip found for "${query}"`);
+  return null;
+}
+
 // ─── GPT-4o ───────────────────────────────────────────────────────────────────
 
 export async function selectBestSegments(
@@ -315,6 +380,11 @@ export async function selectBestSegments(
           `  Must sound like a human speaking — NOT bullet points read aloud.`,
           `  This is what the voiceover will say. The hook must be the opening words.`,
           ``,
+          `BROLL KEYWORDS:`,
+          `- For each clip, provide 3-5 specific visual keywords for searching stock B-roll footage.`,
+          `- Think visually: what scenes, environments, or objects would LOOK GREAT behind the narration?`,
+          `- Be concrete: "busy coffee shop laptop" not "work". "hands shaking" not "anxiety". "city skyline night" not "success".`,
+          ``,
           `QUALITY RULES:`,
           `- Hook must not start with "Are you", "Have you", "Do you" — too generic`,
           `- Avoid filler words: "very", "really", "actually", "just"`,
@@ -338,6 +408,7 @@ export async function selectBestSegments(
       "startTime": 12.3,
       "endTime": 37.1,
       "transcript": "Verbatim quote from the source video at this timestamp",
+      "brollKeywords": ["busy office team meeting", "whiteboard brainstorm", "handshake deal"],
       "reelScript": {
         "hook": "Bold 1-sentence scroll-stopper (≤12 words)",
         "painPoint": "Relatable struggle 1-2 sentences",
@@ -419,7 +490,8 @@ export async function submitShotstackRender(
   segment: VideoSegment,
   webhookUrl: string,
   voiceoverUrl?: string,
-  wordTimings?: WordTiming[]
+  wordTimings?: WordTiming[],
+  brollUrl?: string
 ): Promise<string> {
   const apiKey = process.env.SHOTSTACK_API_KEY;
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
@@ -434,31 +506,56 @@ export async function submitShotstackRender(
     ? buildCaptionTrack(wordTimings, duration)
     : [];
 
+  // Track 2 (bottom): original video — always present as base
+  const originalTrack = {
+    clips: [
+      {
+        asset: {
+          type: "video",
+          src: videoUrl,
+          trim: segment.startTime,
+          volume: voiceoverUrl ? 0 : 1.0,
+        },
+        start: 0,
+        length: duration,
+        fit: "cover",
+        scale: 0,
+      },
+    ],
+  };
+
+  // Track 1 (middle): B-roll overlay — covers the original video when present
+  const brollTrack = brollUrl
+    ? {
+        clips: [
+          {
+            asset: {
+              type: "video",
+              src: brollUrl,
+              trim: 0,
+              volume: 0, // B-roll is always silent; voiceover handles audio
+            },
+            start: 0,
+            length: duration,
+            fit: "cover",
+            scale: 0,
+          },
+        ],
+      }
+    : null;
+
+  const tracks = [
+    // Track 0 (top): captions
+    { clips: captionClips },
+    // Track 1 (middle): B-roll if available
+    ...(brollTrack ? [brollTrack] : []),
+    // Track 2 (bottom): original video (fallback when no B-roll)
+    originalTrack,
+  ];
+
   const edit: Record<string, unknown> = {
     timeline: {
-      tracks: [
-        // Track 0 (top): captions
-        { clips: captionClips },
-        // Track 1 (bottom): source video, audio completely off when voiceover is handling it
-        {
-          clips: [
-            {
-              asset: {
-                type: "video",
-                src: videoUrl,
-                trim: segment.startTime,
-                // KEY FIX: volume 0 = completely silent so voiceover is the ONLY voice
-                volume: voiceoverUrl ? 0 : 1.0,
-              },
-              start: 0,
-              length: duration,
-              fit: "cover",
-              scale: 0,
-            },
-          ],
-        },
-      ],
-      // Voiceover as the primary audio; plays exclusively (video audio is 0)
+      tracks,
       ...(voiceoverUrl && {
         soundtrack: {
           src: voiceoverUrl,
@@ -477,7 +574,7 @@ export async function submitShotstackRender(
   };
 
   console.log(
-    `[shotstack] Submitting render: ${segment.format} | ${duration}s | voiceover=${!!voiceoverUrl}`
+    `[shotstack] Submitting render: ${segment.format} | ${duration}s | voiceover=${!!voiceoverUrl} | broll=${!!brollUrl}`
   );
 
   const res = await fetch(`https://api.shotstack.io/${env}/render`, {
