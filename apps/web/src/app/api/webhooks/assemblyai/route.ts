@@ -158,12 +158,15 @@ export async function POST(req: Request) {
 
         // Generate ElevenLabs voiceover for this clip
         let voiceoverUrl: string | undefined;
+        let wordTimings: import("@/lib/video-processing").WordTiming[] | undefined;
         try {
-          voiceoverUrl = await generateAndUploadVoiceover(
+          const result = await generateAndUploadVoiceover(
             seg.reelScript.narrationScript,
             voiceId!,
             clipKey
           );
+          voiceoverUrl = result.url;
+          wordTimings = result.wordTimings;
         } catch (err) {
           console.warn(`[pipeline] Voiceover failed for clip ${idx}:`, err);
         }
@@ -173,7 +176,8 @@ export async function POST(req: Request) {
           video.storagePath,
           seg,
           shotstackWebhook,
-          voiceoverUrl
+          voiceoverUrl,
+          wordTimings
         );
 
         return db.repurposedClip.create({

@@ -45,6 +45,17 @@ export interface VideoSegment {
   transcript: string;
 }
 
+export interface WordTiming {
+  word: string;
+  start: number; // seconds into the voiceover audio
+  end: number;
+}
+
+export interface VoiceoverResult {
+  url: string;
+  wordTimings: WordTiming[];
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function escapeHtml(text: string): string {
@@ -143,26 +154,63 @@ export async function cloneVoiceFromVideo(
 }
 
 /**
- * Generates a voiceover MP3 using the cloned (or fallback) voice,
- * uploads it to R2, and returns the public URL.
+ * Converts ElevenLabs character-level alignment into word-level timings.
+ */
+function buildWordTimings(
+  characters: string[],
+  startTimes: number[],
+  endTimes: number[]
+): WordTiming[] {
+  const timings: WordTiming[] = [];
+  let wordChars = "";
+  let wordStart = 0;
+
+  for (let i = 0; i <= characters.length; i++) {
+    const isLast = i === characters.length;
+    const char = isLast ? " " : characters[i];
+
+    if (char === " " || char === "\n") {
+      if (wordChars.trim()) {
+        timings.push({
+          word: wordChars.trim(),
+          start: wordStart,
+          end: endTimes[i - 1],
+        });
+        wordChars = "";
+      }
+    } else {
+      if (!wordChars) wordStart = startTimes[i];
+      wordChars += char;
+    }
+  }
+
+  return timings;
+}
+
+/**
+ * Generates a voiceover using the cloned (or fallback) voice via
+ * ElevenLabs /with-timestamps, which returns audio + character-level timing.
+ * Uploads the MP3 to R2 and returns the URL + word-level timings for
+ * perfectly synced captions.
  */
 export async function generateAndUploadVoiceover(
   narrationScript: string,
   voiceId: string,
   clipKey: string
-): Promise<string> {
+): Promise<VoiceoverResult> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY is not set");
 
   console.log(`[voiceover] Generating TTS for clip ${clipKey} (${narrationScript.length} chars)...`);
+
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`,
     {
       method: "POST",
       headers: {
         "xi-api-key": apiKey,
         "Content-Type": "application/json",
-        Accept: "audio/mpeg",
+        Accept: "application/json",
       },
       body: JSON.stringify({
         text: narrationScript,
@@ -182,21 +230,36 @@ export async function generateAndUploadVoiceover(
     throw new Error(`ElevenLabs TTS error ${res.status}: ${err}`);
   }
 
-  const audioBuffer = await res.arrayBuffer();
+  const data = (await res.json()) as {
+    audio_base64: string;
+    alignment: {
+      characters: string[];
+      character_start_times_seconds: number[];
+      character_end_times_seconds: number[];
+    };
+  };
+
+  const audioBuffer = Buffer.from(data.audio_base64, "base64");
   const key = `voiceovers/${clipKey}.mp3`;
 
   await r2.send(
     new PutObjectCommand({
       Bucket: R2_BUCKET,
       Key: key,
-      Body: Buffer.from(audioBuffer),
+      Body: audioBuffer,
       ContentType: "audio/mpeg",
     })
   );
 
-  const publicUrl = `${process.env.R2_PUBLIC_URL}/${key}`;
-  console.log(`[voiceover] ✅ Uploaded: ${publicUrl}`);
-  return publicUrl;
+  const url = `${process.env.R2_PUBLIC_URL}/${key}`;
+  const wordTimings = buildWordTimings(
+    data.alignment.characters,
+    data.alignment.character_start_times_seconds,
+    data.alignment.character_end_times_seconds
+  );
+
+  console.log(`[voiceover] ✅ Uploaded: ${url} (${wordTimings.length} words timed)`);
+  return { url, wordTimings };
 }
 
 // ─── GPT-4o ───────────────────────────────────────────────────────────────────
@@ -301,30 +364,31 @@ export async function selectBestSegments(
 // ─── Shotstack ────────────────────────────────────────────────────────────────
 
 /**
- * Builds word-group captions timed evenly across the clip duration.
- * Groups the narration into 3-word phrases, each shown sequentially.
+ * Builds word-group captions using precise ElevenLabs character-level timing.
+ * Groups words into 3-word phrases with accurate start/end times.
  * Alternates white and yellow text for visual rhythm.
  * Style: Impact font with black outline — the standard viral reel look.
  */
-function buildCaptionTrack(rs: ReelScript, duration: number) {
-  const words = rs.narrationScript.trim().split(/\s+/).filter(Boolean);
+function buildCaptionTrack(wordTimings: WordTiming[], duration: number) {
+  if (!wordTimings.length) return [];
+
   const WORDS_PER_GROUP = 3;
-  const groups: string[] = [];
+  const MIN_DISPLAY = 0.25; // seconds — floor so very fast words still show
 
-  for (let i = 0; i < words.length; i += WORDS_PER_GROUP) {
-    groups.push(words.slice(i, i + WORDS_PER_GROUP).join(" ").toUpperCase());
-  }
+  const captions = [];
+  for (let i = 0; i < wordTimings.length; i += WORDS_PER_GROUP) {
+    const group = wordTimings.slice(i, i + WORDS_PER_GROUP);
+    const text = group.map((w) => w.word).join(" ").toUpperCase();
+    const start = group[0].start;
+    const end = Math.min(group[group.length - 1].end, duration);
+    const length = Math.max(end - start, MIN_DISPLAY);
 
-  if (groups.length === 0) return [];
-
-  const groupDuration = duration / groups.length;
-
-  return groups.map((text, i) => {
-    // Alternate yellow every 3rd group for rhythm; CTA group always yellow
-    const isYellow = i % 3 === 2 || i === groups.length - 1;
+    const groupIndex = Math.floor(i / WORDS_PER_GROUP);
+    const totalGroups = Math.ceil(wordTimings.length / WORDS_PER_GROUP);
+    const isYellow = groupIndex % 3 === 2 || groupIndex === totalGroups - 1;
     const color = isYellow ? "#FFE135" : "#FFFFFF";
 
-    return {
+    captions.push({
       asset: {
         type: "html",
         html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:92px;font-weight:900;color:${color};-webkit-text-stroke:5px #000000;text-align:center;padding:0 48px;line-height:1.1;letter-spacing:2px;margin:0;word-break:break-word;">${escapeHtml(text)}</p>`,
@@ -332,13 +396,15 @@ function buildCaptionTrack(rs: ReelScript, duration: number) {
         height: 220,
         background: "transparent",
       },
-      start: i * groupDuration,
-      length: groupDuration,
+      start,
+      length,
       position: "bottom",
       offset: { x: 0, y: 0.12 },
       transition: { in: "fade", out: "fade" },
-    };
-  });
+    });
+  }
+
+  return captions;
 }
 
 /**
@@ -352,7 +418,8 @@ export async function submitShotstackRender(
   videoUrl: string,
   segment: VideoSegment,
   webhookUrl: string,
-  voiceoverUrl?: string
+  voiceoverUrl?: string,
+  wordTimings?: WordTiming[]
 ): Promise<string> {
   const apiKey = process.env.SHOTSTACK_API_KEY;
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
@@ -363,7 +430,9 @@ export async function submitShotstackRender(
     Math.max(20, segment.endTime - segment.startTime)
   );
 
-  const captionClips = buildCaptionTrack(segment.reelScript, duration);
+  const captionClips = wordTimings?.length
+    ? buildCaptionTrack(wordTimings, duration)
+    : [];
 
   const edit: Record<string, unknown> = {
     timeline: {

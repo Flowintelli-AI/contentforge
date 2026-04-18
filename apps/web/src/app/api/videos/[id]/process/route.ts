@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 
 export const maxDuration = 60;
 
@@ -67,70 +68,12 @@ export async function POST(
     const { id: transcriptId } = (await res.json()) as { id: string };
     console.log(`[process] ✅ transcription submitted id=${transcriptId} for video=${video.id}`);
 
-    // Voice clone: download only the first 20 MB of the video and submit to
-    // ElevenLabs IVC. AssemblyAI takes 3-5 min to complete, so the clone will
-    // finish before the webhook fires. 20 MB covers ≈30-90 s of audio depending
-    // on the video bitrate — enough for a recognisable clone.
-    // Works best with "faststart" MP4s (moov at the start). Falls back silently
-    // to the ELEVENLABS_VOICE_ID env var (or Rachel) if parsing fails.
+    // Voice clone: fire-and-forget via waitUntil so the HTTP response is returned
+    // immediately (~2s) while the clone runs in the background (up to maxDuration).
+    // AssemblyAI takes 3-5 min to complete, so the clone finishes before the webhook.
     const elevenKey = process.env.ELEVENLABS_API_KEY;
     if (elevenKey && !video.clonedVoiceId) {
-      try {
-        const SAMPLE_BYTES = 20 * 1024 * 1024; // 20 MB
-
-        // Check total file size first
-        const headRes = await fetch(video.storagePath, { method: "HEAD" });
-        const totalBytes = parseInt(
-          headRes.headers.get("content-length") ?? "0",
-          10
-        );
-
-        const useRange = totalBytes > SAMPLE_BYTES;
-        const sampleRes = await fetch(video.storagePath, {
-          headers: useRange
-            ? { Range: `bytes=0-${SAMPLE_BYTES - 1}` }
-            : {},
-        });
-
-        const sampleBuffer = await sampleRes.arrayBuffer();
-        const sampleMB = (sampleBuffer.byteLength / 1024 / 1024).toFixed(1);
-        const totalMB = totalBytes ? (totalBytes / 1024 / 1024).toFixed(0) : "?";
-        console.log(
-          `[clone-voice] Sample: ${sampleMB} MB of ${totalMB} MB (range=${useRange})`
-        );
-
-        const form = new FormData();
-        form.append("name", `Speaker-${video.id.slice(-8)}`);
-        form.append("description", "Auto-cloned via ContentForge");
-        form.append("remove_background_noise", "true");
-        // Always use .mp4 extension; ElevenLabs rejects .mpeg4 and similar
-        form.append(
-          "files",
-          new Blob([sampleBuffer], { type: "video/mp4" }),
-          "sample.mp4"
-        );
-
-        const cloneRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-          method: "POST",
-          headers: { "xi-api-key": elevenKey },
-          body: form,
-        });
-
-        if (cloneRes.ok) {
-          const { voice_id } = (await cloneRes.json()) as { voice_id: string };
-          await db.uploadedVideo.update({
-            where: { id: video.id },
-            data: { clonedVoiceId: voice_id },
-          });
-          console.log(`[clone-voice] ✅ Cloned: ${voice_id}`);
-        } else {
-          const errText = await cloneRes.text();
-          console.warn(`[clone-voice] ElevenLabs rejected sample: ${errText}`);
-        }
-      } catch (cloneErr) {
-        // Non-fatal — webhook will fall back to ELEVENLABS_VOICE_ID or Rachel
-        console.warn(`[clone-voice] Failed (non-fatal):`, cloneErr);
-      }
+      waitUntil(performVoiceClone(video.id, video.storagePath, elevenKey));
     }
 
     return NextResponse.json({ success: true, message: "10 clips are rendering — check back in a few minutes!" });
@@ -142,5 +85,59 @@ export async function POST(
       data: { status: "READY" },
     });
     return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+// Runs in background via waitUntil — downloads first 20 MB of video and
+// submits to ElevenLabs IVC. Non-fatal: any failure is logged, webhook falls
+// back to ELEVENLABS_VOICE_ID env var or Rachel.
+async function performVoiceClone(
+  videoId: string,
+  storagePath: string,
+  elevenKey: string
+) {
+  try {
+    const SAMPLE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+    const headRes = await fetch(storagePath, { method: "HEAD" });
+    const totalBytes = parseInt(headRes.headers.get("content-length") ?? "0", 10);
+    const useRange = totalBytes > SAMPLE_BYTES;
+
+    const sampleRes = await fetch(storagePath, {
+      headers: useRange ? { Range: `bytes=0-${SAMPLE_BYTES - 1}` } : {},
+    });
+
+    const sampleBuffer = await sampleRes.arrayBuffer();
+    console.log(
+      `[clone-voice] Sample: ${(sampleBuffer.byteLength / 1024 / 1024).toFixed(1)} MB` +
+      ` of ${totalBytes ? (totalBytes / 1024 / 1024).toFixed(0) : "?"} MB (range=${useRange})`
+    );
+
+    const form = new FormData();
+    form.append("name", `Speaker-${videoId.slice(-8)}`);
+    form.append("description", "Auto-cloned via ContentForge");
+    form.append("remove_background_noise", "true");
+    // Always .mp4 — ElevenLabs rejects .mpeg4 and similar extensions
+    form.append("files", new Blob([sampleBuffer], { type: "video/mp4" }), "sample.mp4");
+
+    const cloneRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+      method: "POST",
+      headers: { "xi-api-key": elevenKey },
+      body: form,
+    });
+
+    if (cloneRes.ok) {
+      const { voice_id } = (await cloneRes.json()) as { voice_id: string };
+      await db.uploadedVideo.update({
+        where: { id: videoId },
+        data: { clonedVoiceId: voice_id },
+      });
+      console.log(`[clone-voice] ✅ Cloned voice_id=${voice_id} for video=${videoId}`);
+    } else {
+      const errText = await cloneRes.text();
+      console.warn(`[clone-voice] ElevenLabs rejected sample for video=${videoId}: ${errText}`);
+    }
+  } catch (err) {
+    console.warn(`[clone-voice] Failed (non-fatal) for video=${videoId}:`, err);
   }
 }
