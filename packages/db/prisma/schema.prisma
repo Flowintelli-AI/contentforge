@@ -337,15 +337,16 @@ model UploadedVideo {
   creatorId    String
   creator      CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
 
-  title        String
-  description  String?
-  storagePath  String      // blob/storage URL
-  duration     Int?        // seconds
-  sizeBytes    BigInt?
-  mimeType     String?
-  status       VideoStatus @default(UPLOADING)
-  transcript   String?
-  metadata     Json?
+  title          String
+  description    String?
+  storagePath    String      // blob/storage URL
+  duration       Int?        // seconds
+  sizeBytes      BigInt?
+  mimeType       String?
+  status         VideoStatus @default(UPLOADING)
+  transcript     String?
+  clonedVoiceId  String?     // ElevenLabs cloned voice ID for this video's speaker
+  metadata       Json?
 
   clips        RepurposedClip[]
 
@@ -366,7 +367,9 @@ model RepurposedClip {
   startTime   Float?
   endTime     Float?
   status      ClipStatus @default(PENDING)
-  opusClipId  String?    // external job ID
+  opusClipId  String?    // external job ID (Shotstack render ID)
+  format      String?    // content format: jabber, ranking, storytelling, etc.
+  reelScript  Json?      // { hook, painPoint, authority, solution, cta, narrationScript }
   captions    String?
   hashtags    String[]
   postCopy    String?

@@ -1,6 +1,11 @@
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
-import { selectBestSegments, submitShotstackRender } from "@/lib/video-processing";
+import {
+  selectBestSegments,
+  submitShotstackRender,
+  cloneVoiceFromVideo,
+  generateAndUploadVoiceover,
+} from "@/lib/video-processing";
 
 export const maxDuration = 60;
 
@@ -33,17 +38,23 @@ export async function POST(req: Request) {
   }
 
   const payload = (await req.json()) as AssemblyAIWebhookPayload;
-  console.log(`AssemblyAI webhook for video ${videoId}: status=${payload.status}, id=${payload.transcript_id}`);
+  console.log(
+    `AssemblyAI webhook for video ${videoId}: status=${payload.status}, id=${payload.transcript_id}`
+  );
 
   if (payload.status === "error") {
-    // Fetch transcript to get the actual error reason
     const apiKey = process.env.ASSEMBLYAI_API_KEY;
     const errRes = await fetch(
       `https://api.assemblyai.com/v2/transcript/${payload.transcript_id}`,
       { headers: { authorization: apiKey! } }
     );
     const errData = errRes.ok ? await errRes.json() : {};
-    console.error(`AssemblyAI error for video ${videoId}:`, errData.error ?? "unknown error", "| url:", errData.audio_url);
+    console.error(
+      `AssemblyAI error for video ${videoId}:`,
+      errData.error ?? "unknown error",
+      "| url:",
+      errData.audio_url
+    );
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { status: "READY" },
@@ -55,14 +66,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Idempotency: if clips already exist for this video, skip (webhook may fire multiple times)
+  // Idempotency: skip if clips already exist
   const existingClips = await db.repurposedClip.count({ where: { videoId } });
   if (existingClips > 0) {
-    console.log(`Video ${videoId} already has ${existingClips} clips, skipping duplicate webhook`);
+    console.log(
+      `Video ${videoId} already has ${existingClips} clips, skipping duplicate webhook`
+    );
     return NextResponse.json({ ok: true });
   }
 
-  // Fetch the full transcript from AssemblyAI (webhook only sends id + status)
+  // Fetch full transcript from AssemblyAI
   const apiKey = process.env.ASSEMBLYAI_API_KEY;
   const transcriptRes = await fetch(
     `https://api.assemblyai.com/v2/transcript/${payload.transcript_id}`,
@@ -70,14 +83,20 @@ export async function POST(req: Request) {
   );
   if (!transcriptRes.ok) {
     console.error(`Failed to fetch transcript ${payload.transcript_id}`);
-    await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
+    await db.uploadedVideo.update({
+      where: { id: videoId },
+      data: { status: "READY" },
+    });
     return NextResponse.json({ ok: true });
   }
   const transcript = (await transcriptRes.json()) as AssemblyAITranscript;
 
   if (!transcript.text) {
     console.error(`Transcript ${payload.transcript_id} has no text`);
-    await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
+    await db.uploadedVideo.update({
+      where: { id: videoId },
+      data: { status: "READY" },
+    });
     return NextResponse.json({ ok: true });
   }
 
@@ -87,30 +106,80 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Build word-level segments from AssemblyAI words (ms → seconds)
+    // Build word-level segments (ms → seconds)
     const words = transcript.words ?? [];
     const segments =
       words.length > 0
-        ? words.map((w) => ({ start: w.start / 1000, end: w.end / 1000, text: w.text }))
+        ? words.map((w) => ({
+            start: w.start / 1000,
+            end: w.end / 1000,
+            text: w.text,
+          }))
         : [{ start: 0, end: 999, text: transcript.text }];
 
-    // Save transcript
+    // Persist transcript
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { transcript: transcript.text },
     });
 
-    // GPT-4o picks best 10 segments
-    const selectedSegments = await selectBestSegments(transcript.text, segments, 10);
+    // GPT-4o: pick 10 best moments with full reel scripts + formats
+    console.log(`[pipeline] Selecting best segments for video ${videoId}...`);
+    const selectedSegments = await selectBestSegments(
+      transcript.text,
+      segments,
+      10
+    );
 
-    // Submit Shotstack renders
+    // ElevenLabs: clone voice (skip if already done, or fall back to default)
+    let voiceId = video.clonedVoiceId ?? null;
+    if (!voiceId) {
+      try {
+        voiceId = await cloneVoiceFromVideo(video.storagePath, videoId);
+        await db.uploadedVideo.update({
+          where: { id: videoId },
+          data: { clonedVoiceId: voiceId },
+        });
+      } catch (err) {
+        console.warn(
+          `[pipeline] Voice clone failed, falling back to default narrator:`,
+          err
+        );
+        // Fall back to ElevenLabs default Rachel voice
+        voiceId = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
+      }
+    }
+
     const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
+      process.env.NEXT_PUBLIC_APP_URL ??
+      "https://contentforge-web-nine.vercel.app";
     const shotstackWebhook = `${appUrl}/api/webhooks/shotstack`;
 
+    // Generate voiceovers + submit Shotstack renders in parallel
     const results = await Promise.allSettled(
-      selectedSegments.map(async (seg) => {
-        const renderId = await submitShotstackRender(video.storagePath, seg, shotstackWebhook);
+      selectedSegments.map(async (seg, idx) => {
+        const clipKey = `${videoId}-clip-${idx}`;
+
+        // Generate ElevenLabs voiceover for this clip
+        let voiceoverUrl: string | undefined;
+        try {
+          voiceoverUrl = await generateAndUploadVoiceover(
+            seg.reelScript.narrationScript,
+            voiceId!,
+            clipKey
+          );
+        } catch (err) {
+          console.warn(`[pipeline] Voiceover failed for clip ${idx}:`, err);
+        }
+
+        // Submit Shotstack render (voiceover optional — falls back to original audio)
+        const renderId = await submitShotstackRender(
+          video.storagePath,
+          seg,
+          shotstackWebhook,
+          voiceoverUrl
+        );
+
         return db.repurposedClip.create({
           data: {
             videoId: video.id,
@@ -119,6 +188,8 @@ export async function POST(req: Request) {
             endTime: seg.endTime,
             captions: seg.transcript,
             opusClipId: renderId,
+            format: seg.format,
+            reelScript: seg.reelScript as object,
             status: "PROCESSING",
             hashtags: [],
           },
@@ -127,17 +198,25 @@ export async function POST(req: Request) {
     );
 
     const succeeded = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results
+      .filter((r) => r.status === "rejected")
+      .map((r) => (r as PromiseRejectedResult).reason);
+    if (failed.length > 0) {
+      console.warn(`[pipeline] ${failed.length} clips failed:`, failed);
+    }
 
-    // Mark video as ready
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { status: "READY" },
     });
 
-    console.log(`Video ${videoId}: ${succeeded} clips queued for rendering`);
+    console.log(`Video ${videoId}: ${succeeded}/10 clips queued for rendering`);
     return NextResponse.json({ ok: true, clipsQueued: succeeded });
   } catch (err) {
-    console.error(`AssemblyAI webhook processing failed for video ${videoId}:`, err);
+    console.error(
+      `AssemblyAI webhook processing failed for video ${videoId}:`,
+      err
+    );
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { status: "READY" },
