@@ -21,7 +21,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (!uid) throw new Error("Unauthorized");
 
         return {
-          access: "public" as const,
           allowedContentTypes: [
             "video/mp4",
             "video/quicktime",

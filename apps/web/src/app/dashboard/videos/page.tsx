@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { put } from "@vercel/blob/client";
 import { api } from "@/lib/trpc/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -140,9 +141,9 @@ export default function VideosPage() {
     setUploadProgress(0);
 
     try {
-      const pathname = `videos/${Date.now()}-${pendingFile.name}`;
+      const pathname = `videos/${Date.now()}-${pendingFile.name.replace(/\s+/g, "-")}`;
 
-      // Step 1: get a client token from our server route (same protocol as @vercel/blob/client uses)
+      // Step 1: get a client token from our server route
       const tokenRes = await fetch("/api/upload/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -154,30 +155,17 @@ export default function VideosPage() {
       if (!tokenRes.ok) throw new Error("Failed to get upload token");
       const { clientToken } = await tokenRes.json() as { clientToken: string };
 
-      // Step 2: PUT directly to Vercel Blob CDN with XHR so we get progress events
-      const blobUrl = await new Promise<string>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        });
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const data = JSON.parse(xhr.responseText) as { url: string };
-            resolve(data.url);
-          } else {
-            reject(new Error(`Upload failed: ${xhr.status}`));
-          }
-        });
-        xhr.addEventListener("error", () => reject(new Error("Upload failed: network error")));
-        xhr.open("PUT", `https://vercel.com/api/blob/${pathname}`);
-        xhr.setRequestHeader("Authorization", `Bearer ${clientToken}`);
-        xhr.setRequestHeader("x-content-type", pendingFile.type);
-        xhr.send(pendingFile);
+      // Step 2: use @vercel/blob/client put() — handles correct upload URL + public access
+      const blob = await put(pathname, pendingFile, {
+        access: "public",
+        token: clientToken,
+        contentType: pendingFile.type,
+        onUploadProgress: ({ percentage }) => setUploadProgress(Math.round(percentage)),
       });
 
       await createMutation.mutateAsync({
         title: titleInput.trim(),
-        storagePath: blobUrl,
+        storagePath: blob.url,
         sizeBytes: pendingFile.size,
         mimeType: pendingFile.type,
       });
