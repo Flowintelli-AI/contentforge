@@ -3,7 +3,6 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ─── R2 client (reuse across calls) ──────────────────────────────────────────
 const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -15,6 +14,7 @@ const r2 = new S3Client({
 const R2_BUCKET = "contentforge-videos";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
 export type ContentFormat =
   | "jabber"
   | "ranking"
@@ -33,7 +33,7 @@ export interface ReelScript {
   authority: string;
   solution: string;
   cta: string;
-  narrationScript: string; // full voiced text ~75-85 words = ~25 seconds
+  narrationScript: string; // ~75-85 words = ~25 seconds voiced
 }
 
 export interface VideoSegment {
@@ -42,15 +42,32 @@ export interface VideoSegment {
   reelScript: ReelScript;
   startTime: number;
   endTime: number;
-  transcript: string; // verbatim quote from source video
+  transcript: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Wraps the last word of a string in a yellow <span> for emphasis.
+ * Creates visual hierarchy without complex markup.
+ */
+function emphasizeLast(text: string): string {
+  const words = escapeHtml(text).split(" ");
+  if (words.length <= 1) return escapeHtml(text);
+  const lastWord = words.pop()!;
+  return `${words.join(" ")} <span class="em">${lastWord}</span>`;
 }
 
 // ─── AssemblyAI ───────────────────────────────────────────────────────────────
 
-/**
- * Submits a transcription job to AssemblyAI and returns immediately.
- * AssemblyAI will POST to webhookUrl when transcription completes.
- */
 export async function submitTranscriptionJob(
   videoUrl: string,
   webhookUrl: string
@@ -66,7 +83,6 @@ export async function submitTranscriptionJob(
     },
     body: JSON.stringify({
       audio_url: videoUrl,
-      speech_models: ["universal-2"],
       punctuate: true,
       format_text: true,
       webhook_url: webhookUrl,
@@ -86,8 +102,10 @@ export async function submitTranscriptionJob(
 
 /**
  * Clones the speaker's voice from the uploaded video.
- * Downloads the video from R2, sends to ElevenLabs Instant Voice Cloning.
- * Returns the ElevenLabs voice_id for use in TTS calls.
+ *
+ * IMPORTANT: ElevenLabs only accepts these extensions: mp3, wav, ogg, flac,
+ * m4a, opus, aac, mp4, mov, webm, mkv. We always upload as "video.mp4"
+ * regardless of the original file extension (fixes the .mpeg4 rejection).
  */
 export async function cloneVoiceFromVideo(
   videoUrl: string,
@@ -101,37 +119,41 @@ export async function cloneVoiceFromVideo(
   if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`);
 
   const videoBuffer = await videoRes.arrayBuffer();
-  const filename = videoUrl.split("/").pop() ?? `video-${videoId}.mp4`;
+  const fileSizeMB = videoBuffer.byteLength / 1024 / 1024;
+  console.log(`[clone-voice] Video size: ${fileSizeMB.toFixed(1)} MB`);
 
   const form = new FormData();
-  form.append("name", `Speaker-${videoId}`);
-  form.append("description", "Auto-cloned voice for ContentForge");
+  form.append("name", `Speaker-${videoId.slice(-8)}`);
+  form.append("description", "Auto-cloned via ContentForge");
   form.append("remove_background_noise", "true");
+  // Always use .mp4 extension — ElevenLabs rejects .mpeg4, .mpeg, etc.
   form.append(
     "files",
     new Blob([videoBuffer], { type: "video/mp4" }),
-    filename
+    "video.mp4"
   );
 
-  console.log(`[clone-voice] Submitting to ElevenLabs (${(videoBuffer.byteLength / 1024 / 1024).toFixed(1)} MB)...`);
+  console.log(`[clone-voice] Submitting to ElevenLabs IVC...`);
   const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
     method: "POST",
     headers: { "xi-api-key": apiKey },
     body: form,
   });
 
+  const responseText = await res.text();
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`ElevenLabs voice clone error ${res.status}: ${err}`);
+    throw new Error(
+      `ElevenLabs voice clone failed (${res.status}): ${responseText}`
+    );
   }
 
-  const { voice_id } = (await res.json()) as { voice_id: string };
-  console.log(`[clone-voice] Voice cloned: ${voice_id}`);
+  const { voice_id } = JSON.parse(responseText) as { voice_id: string };
+  console.log(`[clone-voice] ✅ Voice cloned successfully: ${voice_id}`);
   return voice_id;
 }
 
 /**
- * Generates a voiceover MP3 using ElevenLabs TTS with the cloned voice,
+ * Generates a voiceover MP3 using the cloned (or fallback) voice,
  * uploads it to R2, and returns the public URL.
  */
 export async function generateAndUploadVoiceover(
@@ -142,6 +164,7 @@ export async function generateAndUploadVoiceover(
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY is not set");
 
+  console.log(`[voiceover] Generating TTS for clip ${clipKey} (${narrationScript.length} chars)...`);
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
     {
@@ -182,17 +205,12 @@ export async function generateAndUploadVoiceover(
   );
 
   const publicUrl = `${process.env.R2_PUBLIC_URL}/${key}`;
-  console.log(`[voiceover] Uploaded to R2: ${publicUrl}`);
+  console.log(`[voiceover] ✅ Uploaded: ${publicUrl}`);
   return publicUrl;
 }
 
 // ─── GPT-4o ───────────────────────────────────────────────────────────────────
 
-/**
- * Uses GPT-4o to select the 10 best moments and generate a full reel script
- * (Hook / Pain Point / Authority / Solution / CTA) for each, in one of the
- * 10 proven viral content formats.
- */
 export async function selectBestSegments(
   transcript: string,
   segments: { start: number; end: number; text: string }[],
@@ -218,58 +236,66 @@ export async function selectBestSegments(
       {
         role: "system",
         content: [
-          `You are an expert viral short-form content strategist.`,
+          `You are a world-class viral short-form content strategist specializing in 9:16 reels.`,
           `Your job: find ${count} powerful moments in a video transcript and transform each into`,
-          `a structured viral reel (25 seconds, 9:16 vertical format).`,
+          `a structured viral reel (20-27 seconds, spoken aloud).`,
           ``,
-          `For each clip you must:`,
-          `1. Identify the best moment (startTime/endTime from the transcript, 20-30 seconds)`,
-          `2. Choose the BEST content format for that moment (use variety — max 2 clips per format):`,
-          `   - jabber: energetic direct-to-camera talking head rant`,
-          `   - ranking: "Top N..." numbered list structure`,
-          `   - man-on-the-street: vox pop / interview Q&A energy`,
-          `   - clone: duet-with-self or call-and-response`,
-          `   - day-in-the-life: sequential narrative, "first... then... finally..."`,
-          `   - storytelling: narrative arc (setup → tension → payoff)`,
-          `   - screen: tutorial / how-to / walkthrough`,
-          `   - reactions: commentary overlaid on a clip or idea`,
-          `   - whiteboard: explain with 3-5 visual key points`,
-          `   - split-screen: before/after or comparison`,
-          `3. Write a full reel script in that format's style, structured as:`,
-          `   hook (1 sentence that stops the scroll), painPoint (relatable struggle),`,
-          `   authority (why should they listen), solution (the insight from the video),`,
-          `   cta (clear action to take)`,
-          `4. Combine all sections into narrationScript (~75-85 words = ~25 seconds voiced).`,
-          `   The narrationScript should sound NATURAL when spoken — inspired by the video`,
-          `   moment but written to be compelling, not just verbatim transcript.`,
+          `CONTENT FORMATS — pick the best one per clip, max 2 clips per format:`,
+          `- jabber: energetic direct-to-camera rant/monologue, fast-paced`,
+          `- ranking: "Top 3/5/7..." numbered list with punchy insights`,
+          `- man-on-the-street: conversational Q&A energy, relatable reactions`,
+          `- clone: call-and-response or "here's what most people think vs reality"`,
+          `- day-in-the-life: sequential "first... then... finally..." narrative`,
+          `- storytelling: tight narrative arc — setup / tension / payoff / lesson`,
+          `- screen: tutorial / step-by-step walkthrough energy`,
+          `- reactions: commentary on a surprising fact or moment from the video`,
+          `- whiteboard: "3 things you need to know about X" explanation style`,
+          `- split-screen: before/after or stark comparison`,
+          ``,
+          `REEL STRUCTURE for each clip:`,
+          `- hook: 1 sentence (≤12 words) that STOPS the scroll. Make it provocative, bold, or counterintuitive.`,
+          `- painPoint: 1-2 sentences on the relatable struggle the audience faces right now`,
+          `- authority: 1 sentence explaining why this insight deserves their attention`,
+          `- solution: 2-3 sentences with the KEY insight from the video moment — this is the value`,
+          `- cta: 1 sentence with a clear specific action (save, comment, follow, DM)`,
+          `- narrationScript: ALL sections woven naturally into flowing spoken prose, ≤85 words total.`,
+          `  Must sound like a human speaking — NOT bullet points read aloud.`,
+          `  This is what the voiceover will say. The hook must be the opening words.`,
+          ``,
+          `QUALITY RULES:`,
+          `- Hook must not start with "Are you", "Have you", "Do you" — too generic`,
+          `- Avoid filler words: "very", "really", "actually", "just"`,
+          `- Every sentence should earn its place`,
+          `- The clip should feel complete and satisfying in 25 seconds`,
         ].join("\n"),
       },
       {
         role: "user",
         content: [
           `Full transcript:\n${truncatedTranscript}`,
-          `\nTimestamped segments (seconds):\n${JSON.stringify(sampledSegments, null, 2)}`,
-          `\nReturn EXACTLY ${count} clips as JSON:`,
+          `\nWord-level timestamps (seconds):\n${JSON.stringify(sampledSegments, null, 2)}`,
+          `\nReturn EXACTLY ${count} clips as JSON. Each clip covers a UNIQUE non-overlapping moment.`,
+          `Duration of each clip: between 20 and 27 seconds.`,
+          ``,
           `{
   "clips": [
     {
-      "title": "Short catchy title (max 60 chars)",
+      "title": "Punchy title ≤60 chars",
       "format": "jabber",
-      "startTime": 0.0,
-      "endTime": 27.5,
-      "transcript": "Verbatim quote from this segment of the video",
+      "startTime": 12.3,
+      "endTime": 37.1,
+      "transcript": "Verbatim quote from the source video at this timestamp",
       "reelScript": {
-        "hook": "1-sentence scroll-stopper",
-        "painPoint": "Relatable struggle the audience faces",
-        "authority": "Why this voice/insight matters",
-        "solution": "The key insight or actionable takeaway from the video",
-        "cta": "Clear call to action",
-        "narrationScript": "Full 75-85 word voiced script combining all sections naturally"
+        "hook": "Bold 1-sentence scroll-stopper (≤12 words)",
+        "painPoint": "Relatable struggle 1-2 sentences",
+        "authority": "Why this insight matters — 1 sentence",
+        "solution": "The key value/insight from this moment — 2-3 sentences",
+        "cta": "Specific action for the viewer",
+        "narrationScript": "Full naturally flowing voiced script ≤85 words. Hook opens. Flows without sounding like a list."
       }
     }
   ]
 }`,
-          `Rules: startTime/endTime must match real timestamps from the segments. Duration 20-30s. Vary formats.`,
         ].join("\n"),
       },
     ],
@@ -285,10 +311,106 @@ export async function selectBestSegments(
 // ─── Shotstack ────────────────────────────────────────────────────────────────
 
 /**
- * Submits a Shotstack render job for a single reel clip.
- * - Video: trimmed from source at segment timestamps, audio ducked to 5%
- * - Audio: ElevenLabs voiceover as primary soundtrack
- * - Captions: hook + key lines burned in as text overlay
+ * Builds a section-based caption track for a 9:16 reel.
+ * Shows 4 timed text sections across the clip with visual variety.
+ */
+function buildCaptionTrack(rs: ReelScript, duration: number) {
+  const baseCss = [
+    "* { box-sizing: border-box; margin: 0; padding: 0; }",
+    "body { width: 1080px; display: flex; flex-direction: column;",
+    "  align-items: center; justify-content: center; }",
+    ".em { color: #FFE135; }",
+    ".card { width: 100%; padding: 0 60px; text-align: center;",
+    "  font-family: 'Montserrat', sans-serif; line-height: 1.2; }",
+  ].join(" ");
+
+  // HOOK (0% → 28%) — White uppercase, very large, bold
+  const hookSection = {
+    asset: {
+      type: "html",
+      html: `<div class="card"><p class="hook">${emphasizeLast(rs.hook)}</p></div>`,
+      css:
+        baseCss +
+        " .hook { font-size: 64px; font-weight: 900; color: #FFFFFF;" +
+        " text-transform: uppercase; letter-spacing: -1px;" +
+        " text-shadow: 3px 3px 10px rgba(0,0,0,0.95); }",
+      width: 1080,
+      height: 380,
+    },
+    start: 0,
+    length: duration * 0.28,
+    position: "bottom",
+    offset: { x: 0, y: 0.22 },
+    transition: { in: "fade", out: "fade" },
+  };
+
+  // PAIN POINT (28% → 52%) — Yellow, slightly smaller
+  const painSection = {
+    asset: {
+      type: "html",
+      html: `<div class="card"><p class="pain">${escapeHtml(rs.painPoint)}</p></div>`,
+      css:
+        baseCss +
+        " .pain { font-size: 48px; font-weight: 700; color: #FFE135;" +
+        " text-shadow: 2px 2px 8px rgba(0,0,0,0.9); }",
+      width: 1080,
+      height: 320,
+    },
+    start: duration * 0.28,
+    length: duration * 0.24,
+    position: "bottom",
+    offset: { x: 0, y: 0.22 },
+    transition: { in: "fade", out: "fade" },
+  };
+
+  // SOLUTION (52% → 80%) — White with semi-transparent background pill
+  const solutionSection = {
+    asset: {
+      type: "html",
+      html: `<div class="card"><p class="sol">${emphasizeLast(rs.solution)}</p></div>`,
+      css:
+        baseCss +
+        " .card { background: rgba(0,0,0,0.55); border-radius: 24px; padding: 28px 60px; }" +
+        " .sol { font-size: 44px; font-weight: 700; color: #FFFFFF;" +
+        " text-shadow: 1px 1px 4px rgba(0,0,0,0.8); }",
+      width: 1080,
+      height: 340,
+    },
+    start: duration * 0.52,
+    length: duration * 0.28,
+    position: "bottom",
+    offset: { x: 0, y: 0.22 },
+    transition: { in: "fade", out: "fade" },
+  };
+
+  // CTA (80% → 100%) — Red/coral, bold action
+  const ctaSection = {
+    asset: {
+      type: "html",
+      html: `<div class="card"><p class="cta">👉 ${escapeHtml(rs.cta)}</p></div>`,
+      css:
+        baseCss +
+        " .cta { font-size: 50px; font-weight: 900; color: #FF4C4C;" +
+        " text-shadow: 2px 2px 8px rgba(0,0,0,0.9); letter-spacing: -0.5px; }",
+      width: 1080,
+      height: 280,
+    },
+    start: duration * 0.80,
+    length: duration * 0.20,
+    position: "bottom",
+    offset: { x: 0, y: 0.22 },
+    transition: { in: "fade", out: "fade" },
+  };
+
+  return [hookSection, painSection, solutionSection, ctaSection];
+}
+
+/**
+ * Submits a Shotstack render for a single vertical reel clip.
+ *
+ * Audio strategy:
+ * - If voiceoverUrl present: video audio = MUTED (volume 0), voiceover = primary audio via soundtrack
+ * - If no voiceover: original video audio plays normally at full volume
  */
 export async function submitShotstackRender(
   videoUrl: string,
@@ -300,77 +422,38 @@ export async function submitShotstackRender(
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
 
   const env = process.env.SHOTSTACK_ENV ?? "stage";
-  const duration = Math.max(1, segment.endTime - segment.startTime);
+  const duration = Math.min(
+    27,
+    Math.max(20, segment.endTime - segment.startTime)
+  );
 
-  // Caption text: hook on first half, CTA on second half
-  const captionHook = segment.reelScript?.hook ?? segment.title;
-  const captionCta = segment.reelScript?.cta ?? "";
-
-  const tracks = [
-    // Caption overlays (top track = rendered on top)
-    {
-      clips: [
-        {
-          asset: {
-            type: "html",
-            html: `<p>${captionHook}</p>`,
-            css: [
-              "p { font-family: 'Montserrat', sans-serif; font-weight: 900;",
-              "font-size: 52px; color: #FFFFFF; text-align: center;",
-              "text-shadow: 3px 3px 6px rgba(0,0,0,0.9);",
-              "padding: 0 40px; line-height: 1.2; }",
-            ].join(" "),
-            width: 1080,
-            height: 300,
-          },
-          start: 0,
-          length: duration * 0.55,
-          position: "bottom",
-          offset: { y: 0.15 },
-        },
-        {
-          asset: {
-            type: "html",
-            html: `<p>${captionCta}</p>`,
-            css: [
-              "p { font-family: 'Montserrat', sans-serif; font-weight: 700;",
-              "font-size: 44px; color: #FFE135; text-align: center;",
-              "text-shadow: 2px 2px 4px rgba(0,0,0,0.9);",
-              "padding: 0 40px; line-height: 1.2; }",
-            ].join(" "),
-            width: 1080,
-            height: 200,
-          },
-          start: duration * 0.75,
-          length: duration * 0.25,
-          position: "bottom",
-          offset: { y: 0.15 },
-        },
-      ],
-    },
-    // Video track (original footage, audio nearly muted so voiceover is primary)
-    {
-      clips: [
-        {
-          asset: {
-            type: "video",
-            src: videoUrl,
-            trim: segment.startTime,
-            volume: voiceoverUrl ? 0.05 : 1.0, // near-silent if voiceover present
-          },
-          start: 0,
-          length: duration,
-          fit: "cover",
-          scale: 0,
-        },
-      ],
-    },
-  ];
+  const captionClips = buildCaptionTrack(segment.reelScript, duration);
 
   const edit: Record<string, unknown> = {
     timeline: {
-      tracks,
-      // ElevenLabs voiceover as primary audio soundtrack
+      tracks: [
+        // Track 0 (top): captions
+        { clips: captionClips },
+        // Track 1 (bottom): source video, audio completely off when voiceover is handling it
+        {
+          clips: [
+            {
+              asset: {
+                type: "video",
+                src: videoUrl,
+                trim: segment.startTime,
+                // KEY FIX: volume 0 = completely silent so voiceover is the ONLY voice
+                volume: voiceoverUrl ? 0 : 1.0,
+              },
+              start: 0,
+              length: duration,
+              fit: "cover",
+              scale: 0,
+            },
+          ],
+        },
+      ],
+      // Voiceover as the primary audio; plays exclusively (video audio is 0)
       ...(voiceoverUrl && {
         soundtrack: {
           src: voiceoverUrl,
@@ -388,6 +471,10 @@ export async function submitShotstackRender(
     callback: webhookUrl,
   };
 
+  console.log(
+    `[shotstack] Submitting render: ${segment.format} | ${duration}s | voiceover=${!!voiceoverUrl}`
+  );
+
   const res = await fetch(`https://api.shotstack.io/${env}/render`, {
     method: "POST",
     headers: {
@@ -403,5 +490,6 @@ export async function submitShotstackRender(
   }
 
   const data = (await res.json()) as { response: { id: string } };
+  console.log(`[shotstack] ✅ Render queued: ${data.response.id}`);
   return data.response.id;
 }
