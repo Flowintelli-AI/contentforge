@@ -85,6 +85,7 @@ export async function submitTranscriptionJob(
       audio_url: videoUrl,
       punctuate: true,
       format_text: true,
+      word_boost: [],
       webhook_url: webhookUrl,
     }),
   });
