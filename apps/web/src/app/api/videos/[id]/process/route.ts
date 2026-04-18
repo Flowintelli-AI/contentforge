@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
-import { submitTranscriptionJob } from "@/lib/video-processing";
 
 export const maxDuration = 30;
 
@@ -35,13 +34,37 @@ export async function POST(
   });
 
   try {
+    const apiKey = process.env.ASSEMBLYAI_API_KEY;
+    if (!apiKey) throw new Error("ASSEMBLYAI_API_KEY is not set");
+
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
     const webhookUrl = `${appUrl}/api/webhooks/assemblyai?videoId=${video.id}`;
 
     console.log(`[process] submitting transcription for video=${video.id} storagePath=${video.storagePath}`);
-    await submitTranscriptionJob(video.storagePath, webhookUrl);
-    console.log(`[process] ✅ transcription submitted for video=${video.id}`);
+
+    // Inline AssemblyAI call — no speech_models param (fixes cached build issue)
+    const res = await fetch("https://api.assemblyai.com/v2/transcript", {
+      method: "POST",
+      headers: {
+        authorization: apiKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        audio_url: video.storagePath,
+        punctuate: true,
+        format_text: true,
+        webhook_url: webhookUrl,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`AssemblyAI submit error ${res.status}: ${err}`);
+    }
+
+    const { id: transcriptId } = (await res.json()) as { id: string };
+    console.log(`[process] ✅ transcription submitted id=${transcriptId} for video=${video.id}`);
 
     return NextResponse.json({ success: true, message: "Transcription started. Clips will appear shortly." });
   } catch (err) {
