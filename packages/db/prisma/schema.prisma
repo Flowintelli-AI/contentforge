@@ -346,6 +346,7 @@ model UploadedVideo {
   status         VideoStatus @default(UPLOADING)
   transcript     String?
   clonedVoiceId  String?     // ElevenLabs cloned voice ID for this video's speaker
+  submagicProjectId  String?     // Submagic Magic Clips project ID
   metadata       Json?
 
   clips        RepurposedClip[]
@@ -368,6 +369,7 @@ model RepurposedClip {
   endTime     Float?
   status      ClipStatus @default(PENDING)
   opusClipId  String?    // external job ID (Shotstack render ID)
+  thumbnailUrl  String?    // clip thumbnail URL from Submagic
   format      String?    // content format: jabber, ranking, storytelling, etc.
   reelScript  Json?      // { hook, painPoint, authority, solution, cta, narrationScript }
   captions    String?

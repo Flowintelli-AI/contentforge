@@ -1,11 +1,5 @@
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
-import {
-  selectBestSegments,
-  submitShotstackRender,
-  generateAndUploadVoiceover,
-  fetchPexelsBroll,
-} from "@/lib/video-processing";
 
 export const maxDuration = 60;
 
@@ -39,7 +33,7 @@ export async function POST(req: Request) {
 
   const payload = (await req.json()) as AssemblyAIWebhookPayload;
   console.log(
-    `AssemblyAI webhook for video ${videoId}: status=${payload.status}, id=${payload.transcript_id}`
+    `[assemblyai] webhook for video ${videoId}: status=${payload.status}, id=${payload.transcript_id}`
   );
 
   if (payload.status === "error") {
@@ -50,7 +44,7 @@ export async function POST(req: Request) {
     );
     const errData = errRes.ok ? await errRes.json() : {};
     console.error(
-      `AssemblyAI error for video ${videoId}:`,
+      `[assemblyai] error for video ${videoId}:`,
       errData.error ?? "unknown error",
       "| url:",
       errData.audio_url
@@ -66,11 +60,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Idempotency: skip if clips already exist
-  const existingClips = await db.repurposedClip.count({ where: { videoId } });
-  if (existingClips > 0) {
+  const video = await db.uploadedVideo.findUnique({ where: { id: videoId } });
+  if (!video) {
+    return NextResponse.json({ error: "Video not found" }, { status: 404 });
+  }
+
+  // Idempotency: skip if already submitted to Submagic
+  if (video.submagicProjectId) {
     console.log(
-      `Video ${videoId} already has ${existingClips} clips, skipping duplicate webhook`
+      `[assemblyai] video ${videoId} already submitted to Submagic (projectId=${video.submagicProjectId}), skipping`
     );
     return NextResponse.json({ ok: true });
   }
@@ -82,7 +80,7 @@ export async function POST(req: Request) {
     { headers: { authorization: apiKey! } }
   );
   if (!transcriptRes.ok) {
-    console.error(`Failed to fetch transcript ${payload.transcript_id}`);
+    console.error(`[assemblyai] failed to fetch transcript ${payload.transcript_id}`);
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { status: "READY" },
@@ -91,8 +89,14 @@ export async function POST(req: Request) {
   }
   const transcript = (await transcriptRes.json()) as AssemblyAITranscript;
 
+  // Save transcript text to DB
+  await db.uploadedVideo.update({
+    where: { id: videoId },
+    data: { transcript: transcript.text ?? null },
+  });
+
   if (!transcript.text) {
-    console.error(`Transcript ${payload.transcript_id} has no text`);
+    console.warn(`[assemblyai] transcript ${payload.transcript_id} has no text`);
     await db.uploadedVideo.update({
       where: { id: videoId },
       data: { status: "READY" },
@@ -100,133 +104,59 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const video = await db.uploadedVideo.findUnique({ where: { id: videoId } });
-  if (!video) {
-    return NextResponse.json({ error: "Video not found" }, { status: 404 });
-  }
-
+  // Submit to Submagic Magic Clips for viral reel generation
   try {
-    // Build word-level segments (ms → seconds)
-    const words = transcript.words ?? [];
-    const segments =
-      words.length > 0
-        ? words.map((w) => ({
-            start: w.start / 1000,
-            end: w.end / 1000,
-            text: w.text,
-          }))
-        : [{ start: 0, end: 999, text: transcript.text }];
-
-    // Persist transcript
-    await db.uploadedVideo.update({
-      where: { id: videoId },
-      data: { transcript: transcript.text },
-    });
-
-    // GPT-4o: pick 10 best moments with full reel scripts + formats
-    console.log(`[pipeline] Selecting best segments for video ${videoId}...`);
-    const selectedSegments = await selectBestSegments(
-      transcript.text,
-      segments,
-      10
-    );
-
-    // ElevenLabs voice selection:
-    // 1. Use voice already cloned for this video (stored in DB)
-    // 2. Use ELEVENLABS_VOICE_ID env var (pre-created voice clone from ElevenLabs dashboard)
-    // 3. Fall back to Rachel (default ElevenLabs voice)
-    //
-    // NOTE: Runtime cloning is skipped here because the webhook runs in a 60s
-    // serverless function — downloading + uploading a 5-min video reliably exceeds
-    // that limit. Create your voice clone at elevenlabs.io, copy the Voice ID,
-    // and set ELEVENLABS_VOICE_ID in Vercel env vars.
-    const voiceId =
-      video.clonedVoiceId ??
-      process.env.ELEVENLABS_VOICE_ID ??
-      "21m00Tcm4TlvDq8ikWAM"; // Rachel fallback
-
-    console.log(`[pipeline] Using voice ID: ${voiceId} for video ${videoId}`);
-
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ??
       "https://contentforge-web-nine.vercel.app";
-    const shotstackWebhook = `${appUrl}/api/webhooks/shotstack`;
 
-    // Generate voiceovers + submit Shotstack renders in parallel
-    const results = await Promise.allSettled(
-      selectedSegments.map(async (seg, idx) => {
-        const clipKey = `${videoId}-clip-${idx}`;
-
-        // Generate ElevenLabs voiceover for this clip
-        let voiceoverUrl: string | undefined;
-        let wordTimings: import("@/lib/video-processing").WordTiming[] | undefined;
-        try {
-          const result = await generateAndUploadVoiceover(
-            seg.reelScript.narrationScript,
-            voiceId!,
-            clipKey
-          );
-          voiceoverUrl = result.url;
-          wordTimings = result.wordTimings;
-        } catch (err) {
-          console.warn(`[pipeline] Voiceover failed for clip ${idx}:`, err);
-        }
-
-        // Fetch Pexels B-roll for this clip (parallel with other clips)
-        let brollUrl: string | null = null;
-        if (seg.brollKeywords?.length) {
-          const clipDuration = Math.min(27, Math.max(20, seg.endTime - seg.startTime));
-          brollUrl = await fetchPexelsBroll(seg.brollKeywords, clipDuration).catch((err) => {
-            console.warn(`[broll] Failed for clip ${idx}:`, err);
-            return null;
-          });
-        }
-
-        // Submit Shotstack render (voiceover + B-roll optional)
-        const renderId = await submitShotstackRender(
-          video.storagePath,
-          seg,
-          shotstackWebhook,
-          voiceoverUrl,
-          wordTimings,
-          brollUrl ?? undefined
-        );
-
-        return db.repurposedClip.create({
-          data: {
-            videoId: video.id,
-            title: seg.title,
-            startTime: seg.startTime,
-            endTime: seg.endTime,
-            captions: seg.transcript,
-            opusClipId: renderId,
-            format: seg.format,
-            reelScript: seg.reelScript as object,
-            status: "PROCESSING",
-            hashtags: [],
-          },
-        });
-      })
+    const submagicRes = await fetch(
+      "https://api.submagic.co/v1/projects/magic-clips",
+      {
+        method: "POST",
+        headers: {
+          "x-api-key": process.env.SUBMAGIC_API_KEY!,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: video.title ?? "ContentForge Video",
+          language: "en",
+          videoUrl: video.storagePath,
+          webhookUrl: `${appUrl}/api/webhooks/submagic?videoId=${videoId}`,
+          minClipLength: 20,
+          maxClipLength: 60,
+          templateName: "Hormozi 2",
+        }),
+      }
     );
 
-    const succeeded = results.filter((r) => r.status === "fulfilled").length;
-    const failed = results
-      .filter((r) => r.status === "rejected")
-      .map((r) => (r as PromiseRejectedResult).reason);
-    if (failed.length > 0) {
-      console.warn(`[pipeline] ${failed.length} clips failed:`, failed);
+    if (!submagicRes.ok) {
+      const errText = await submagicRes.text();
+      console.error(`[submagic] failed to submit video ${videoId}:`, errText);
+      await db.uploadedVideo.update({
+        where: { id: videoId },
+        data: { status: "READY" },
+      });
+      return NextResponse.json({ ok: true });
     }
+
+    const submagicData = (await submagicRes.json()) as { projectId: string };
+    console.log(
+      `[submagic] submitted video ${videoId} → projectId=${submagicData.projectId}`
+    );
 
     await db.uploadedVideo.update({
       where: { id: videoId },
-      data: { status: "READY" },
+      data: { submagicProjectId: submagicData.projectId },
     });
 
-    console.log(`Video ${videoId}: ${succeeded}/10 clips queued for rendering`);
-    return NextResponse.json({ ok: true, clipsQueued: succeeded });
+    return NextResponse.json({
+      ok: true,
+      submagicProjectId: submagicData.projectId,
+    });
   } catch (err) {
     console.error(
-      `AssemblyAI webhook processing failed for video ${videoId}:`,
+      `[assemblyai] Submagic submission failed for video ${videoId}:`,
       err
     );
     await db.uploadedVideo.update({
