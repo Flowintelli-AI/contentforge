@@ -1,0 +1,2 @@
+-- Add SCRIPT_NEEDED value to ClipStatus enum
+ALTER TYPE "ClipStatus" ADD VALUE IF NOT EXISTS 'SCRIPT_NEEDED';
