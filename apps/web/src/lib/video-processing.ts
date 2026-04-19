@@ -288,7 +288,7 @@ export async function fetchPexelsBroll(
   console.log(`[broll] Searching Pexels for "${query}" (min ${minDurationSeconds}s)`);
 
   const res = await fetch(
-    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=8&orientation=portrait`,
+    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=8&orientation=portrait&size=medium`,
     { headers: { Authorization: apiKey } }
   );
 
@@ -311,9 +311,21 @@ export async function fetchPexelsBroll(
       })[0];
 
     if (file) {
-      console.log(`[broll] ✅ Found: ${file.quality} ${file.width}x${file.height}`);
-      return file.link;
-    }
+        // Validate that Shotstack's rendering servers can actually reach this URL.
+        // Pexels sometimes returns Vimeo CDN links that block non-browser requests.
+        try {
+          const headRes = await fetch(file.link, { method: "HEAD" });
+          if (!headRes.ok) {
+            console.warn(`[broll] URL not reachable (${headRes.status}), trying next video`);
+            continue;
+          }
+        } catch {
+          console.warn("[broll] HEAD request failed, trying next video");
+          continue;
+        }
+        console.log(`[broll] ✅ Found: ${file.quality} ${file.width}x${file.height}`);
+        return file.link;
+      }
   }
 
   // Retry without portrait filter if nothing found

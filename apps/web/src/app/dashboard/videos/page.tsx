@@ -152,12 +152,15 @@ export default function VideosPage() {
         }),
       });
       if (!tokenRes.ok) throw new Error("Failed to get upload URL");
-      const { presignedUrl, publicUrl } = await tokenRes.json() as {
+      const { presignedUrl, publicUrl, contentType: normalizedContentType } = await tokenRes.json() as {
         presignedUrl: string;
         publicUrl: string;
+        contentType: string;
       };
 
-      // Step 2: upload directly to R2 with progress tracking
+      // Step 2: upload directly to R2 with progress tracking.
+      // MUST use the server-returned contentType — the presigned URL is signed
+      // with that exact value, and R2 rejects mismatches with a 403.
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.upload.addEventListener("progress", (e) => {
@@ -169,7 +172,7 @@ export default function VideosPage() {
         });
         xhr.addEventListener("error", () => reject(new Error("Upload failed: network error")));
         xhr.open("PUT", presignedUrl);
-        xhr.setRequestHeader("Content-Type", pendingFile.type);
+        xhr.setRequestHeader("Content-Type", normalizedContentType);
         xhr.send(pendingFile);
       });
 
@@ -177,7 +180,7 @@ export default function VideosPage() {
         title: titleInput.trim(),
         storagePath: publicUrl,
         sizeBytes: pendingFile.size,
-        mimeType: pendingFile.type,
+        mimeType: normalizedContentType,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");

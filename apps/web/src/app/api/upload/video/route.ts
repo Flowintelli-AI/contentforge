@@ -35,19 +35,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "File too large (max 500 MB)" }, { status: 400 });
     }
 
-    const key = `videos/${Date.now()}-${filename.replace(/\s+/g, "-")}`;
+    // Always normalise to .mp4 + video/mp4 so Shotstack can decode the video.
+    // Browsers often report "" or "video/mpeg4" for .mpeg4 files, which causes R2
+    // to store the object as application/octet-stream and Shotstack to render a
+    // black video track.
+    const safeName = filename
+      .replace(/\s+/g, "-")
+      .replace(/\.(mpeg4|mpeg|mov|avi|webm|m4v|3gp|mkv)$/i, ".mp4");
+    const normalizedContentType = "video/mp4";
+
+    const key = `videos/${Date.now()}-${safeName}`;
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,
       Key: key,
-      ContentType: contentType,
+      ContentType: normalizedContentType,
     });
 
     // Presigned URL valid for 1 hour
     const presignedUrl = await getSignedUrl(r2, command, { expiresIn: 3600 });
     const publicUrl = `${process.env.R2_PUBLIC_URL}/${key}`;
 
-    return NextResponse.json({ presignedUrl, publicUrl, key });
+    // Return normalizedContentType so the client uses it in the XHR PUT header
+    // (must match what the presigned URL was signed with, or R2 returns 403)
+    return NextResponse.json({ presignedUrl, publicUrl, key, contentType: normalizedContentType });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to generate upload URL" },
