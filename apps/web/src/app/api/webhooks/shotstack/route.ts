@@ -67,14 +67,17 @@ export async function POST(req: Request) {
       console.error(`[shotstack] Submagic submission failed clip=${clip.id}:`, errText);
       await db.repurposedClip.update({ where: { id: clip.id }, data: { status: "FAILED" } });
     } else {
-      const submagicData = (await submagicRes.json()) as { projectId: string };
+      const submagicData = await submagicRes.json() as Record<string, unknown>;
+      console.log(`[shotstack] Submagic raw response:`, JSON.stringify(submagicData));
+      // Submagic may return projectId, id, or project_id depending on API version
+      const projectId = (submagicData.projectId ?? submagicData.id ?? submagicData.project_id) as string | undefined;
       // Store Submagic projectId in opusClipId (repurposing legacy field as tracking ref)
       await db.repurposedClip.update({
         where: { id: clip.id },
-        data: { opusClipId: `submagic:${submagicData.projectId}` },
+        data: { opusClipId: projectId ? `submagic:${projectId}` : `submagic:unknown` },
       });
       console.log(
-        `[shotstack] clip=${clip.id} → Submagic projectId=${submagicData.projectId}`
+        `[shotstack] clip=${clip.id} → Submagic projectId=${projectId}`
       );
     }
   } catch (err) {
