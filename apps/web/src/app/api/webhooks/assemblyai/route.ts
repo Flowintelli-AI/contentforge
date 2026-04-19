@@ -296,7 +296,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const video = await db.uploadedVideo.findUnique({ where: { id: videoId } });
+  const video = await db.uploadedVideo.findUnique({
+    where: { id: videoId },
+    include: { creator: true },
+  });
   if (!video) return NextResponse.json({ error: "Video not found" }, { status: 404 });
 
   // Idempotency: skip if clips already created

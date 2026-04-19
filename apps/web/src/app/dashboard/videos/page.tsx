@@ -42,11 +42,12 @@ function formatBytes(bytes: bigint | number) {
 }
 
 const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  UPLOADING:  { label: "Uploading",  variant: "secondary" },
-  PROCESSING: { label: "Processing", variant: "secondary" },
-  READY:      { label: "Ready",      variant: "default" },
-  FAILED:     { label: "Failed",     variant: "destructive" },
-  ARCHIVED:   { label: "Archived",   variant: "outline" },
+  UPLOADING:     { label: "Uploading",       variant: "secondary" },
+  PROCESSING:    { label: "Processing",      variant: "secondary" },
+  GENERATING_AI: { label: "✨ AI Generating…", variant: "secondary" },
+  READY:         { label: "Ready",           variant: "default" },
+  FAILED:        { label: "Failed",          variant: "destructive" },
+  ARCHIVED:      { label: "Archived",        variant: "outline" },
 };
 
 export default function VideosPage() {
@@ -60,7 +61,8 @@ export default function VideosPage() {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(false);
   const [clipsDialogVideoId, setClipsDialogVideoId] = useState<string | null>(null);
-  // sr-only input: position:absolute 1px — programmatic .click() always works
+  // Track clips we've already fired ai-generate for (avoids re-triggering on re-render)
+  const triggeredAiFills = useRef<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
@@ -70,12 +72,27 @@ export default function VideosPage() {
     refetchInterval: pollEnabled ? 8000 : false,
   });
 
-  // Enable polling whenever processing clips exist
+  // Enable polling whenever processing or AI-generating clips exist
   useEffect(() => {
     const hasProcessing = videos.some(
-      (v) => v.status === "PROCESSING" || v.clips.some((c) => c.status === "PROCESSING")
+      (v) => v.status === "PROCESSING" || v.clips.some((c) => c.status === "PROCESSING" || c.status === "GENERATING_AI")
     );
     setPollEnabled(hasProcessing);
+  }, [videos]);
+
+  // Auto-trigger ai-generate for any GENERATING_AI clips not yet fired
+  useEffect(() => {
+    for (const video of videos) {
+      for (const clip of video.clips) {
+        if (clip.status === "GENERATING_AI" && !triggeredAiFills.current.has(clip.id)) {
+          triggeredAiFills.current.add(clip.id);
+          fetch(`/api/clips/${clip.id}/ai-generate`, { method: "POST" })
+            .then((r) => r.json())
+            .then((d) => console.log(`[ai-fill] clip=${clip.id}`, d))
+            .catch((e) => console.error(`[ai-fill] clip=${clip.id}`, e));
+        }
+      }
+    }
   }, [videos]);
 
   const createMutation = api.videos.create.useMutation({
@@ -371,15 +388,20 @@ export default function VideosPage() {
                       {video.clips.slice(0, 4).map((clip) => (
                         <div key={clip.id} className="flex items-center gap-2 text-xs">
                           <span className="truncate flex-1">{clip.title}</span>
+                          {(clip as { isAIGenerated?: boolean }).isAIGenerated && (
+                            <span className="shrink-0 text-[9px] bg-violet-100 text-violet-700 px-1 py-0 rounded">✨AI</span>
+                          )}
                           {clip.status === "READY" && clip.storagePath ? (
-                            <a
-                              href={clip.storagePath}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={() => setPlayUrl(clip.storagePath!)}
                               className="text-primary hover:underline shrink-0 flex items-center gap-0.5"
                             >
-                              <ExternalLink className="h-3 w-3" /> View
-                            </a>
+                              <Play className="h-3 w-3 fill-current" /> Play
+                            </button>
+                          ) : clip.status === "GENERATING_AI" ? (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                              <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> AI…
+                            </Badge>
                           ) : (
                             <Badge
                               variant={clip.status === "FAILED" ? "destructive" : "secondary"}
@@ -544,15 +566,20 @@ export default function VideosPage() {
                 <div key={clip.id} className="flex items-center gap-3 text-sm py-1.5 border-b last:border-0">
                   <span className="text-muted-foreground w-6 shrink-0 text-right">{i + 1}.</span>
                   <span className="truncate flex-1">{clip.title}</span>
+                  {(clip as { isAIGenerated?: boolean }).isAIGenerated && (
+                    <span className="shrink-0 text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">✨AI</span>
+                  )}
                   {clip.status === "READY" && clip.storagePath ? (
-                    <a
-                      href={clip.storagePath}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() => { setClipsDialogVideoId(null); setPlayUrl(clip.storagePath!); }}
                       className="text-primary hover:underline shrink-0 flex items-center gap-1 text-xs"
                     >
-                      <ExternalLink className="h-3 w-3" /> View
-                    </a>
+                      <Play className="h-3 w-3 fill-current" /> Play
+                    </button>
+                  ) : clip.status === "GENERATING_AI" ? (
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                      <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" /> AI…
+                    </Badge>
                   ) : (
                     <Badge
                       variant={clip.status === "FAILED" ? "destructive" : "secondary"}
