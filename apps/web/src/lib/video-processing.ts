@@ -447,16 +447,16 @@ export async function selectBestSegments(
 // ─── Shotstack ────────────────────────────────────────────────────────────────
 
 /**
- * Builds word-group captions using precise ElevenLabs character-level timing.
- * Groups words into 3-word phrases with accurate start/end times.
- * Alternates white and yellow text for visual rhythm.
- * Style: Impact font with black outline — the standard viral reel look.
+ * Kinetic 2-word captions synced to ElevenLabs word-level timestamps.
+ * Each group flashes on screen for exactly the duration those words are spoken.
+ * Alternates white / yellow — the viral TikTok / Reels caption standard.
+ * Impact font + black stroke = maximum legibility on any background.
  */
 function buildCaptionTrack(wordTimings: WordTiming[], duration: number) {
   if (!wordTimings.length) return [];
 
-  const WORDS_PER_GROUP = 3;
-  const MIN_DISPLAY = 0.25; // seconds — floor so very fast words still show
+  const WORDS_PER_GROUP = 2; // 2-word groups = faster, more energetic cadence
+  const MIN_DISPLAY = 0.2;
 
   const captions = [];
   for (let i = 0; i < wordTimings.length; i += WORDS_PER_GROUP) {
@@ -466,23 +466,23 @@ function buildCaptionTrack(wordTimings: WordTiming[], duration: number) {
     const end = Math.min(group[group.length - 1].end, duration);
     const length = Math.max(end - start, MIN_DISPLAY);
 
+    // Every 3rd group yellow — creates rhythm without being distracting
     const groupIndex = Math.floor(i / WORDS_PER_GROUP);
-    const totalGroups = Math.ceil(wordTimings.length / WORDS_PER_GROUP);
-    const isYellow = groupIndex % 3 === 2 || groupIndex === totalGroups - 1;
+    const isYellow = groupIndex % 3 === 2;
     const color = isYellow ? "#FFE135" : "#FFFFFF";
 
     captions.push({
       asset: {
         type: "html",
-        html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:92px;font-weight:900;color:${color};-webkit-text-stroke:5px #000000;text-align:center;padding:0 48px;line-height:1.1;letter-spacing:2px;margin:0;word-break:break-word;">${escapeHtml(text)}</p>`,
+        html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:105px;font-weight:900;color:${color};-webkit-text-stroke:6px #000000;text-align:center;padding:0 40px;line-height:1.05;letter-spacing:1px;margin:0;word-break:break-word;">${escapeHtml(text)}</p>`,
         width: 1080,
-        height: 220,
+        height: 240,
         background: "transparent",
       },
       start,
       length,
       position: "bottom",
-      offset: { x: 0, y: 0.12 },
+      offset: { x: 0, y: 0.14 },
       transition: { in: "fade", out: "fade" },
     });
   }
@@ -491,11 +491,39 @@ function buildCaptionTrack(wordTimings: WordTiming[], duration: number) {
 }
 
 /**
- * Submits a Shotstack render for a single vertical reel clip.
+ * Builds a hook text card shown at the very start of the clip (0 → 1.8s).
+ * Large bold text that stops the scroll before the speaker even appears.
+ */
+function buildHookCard(hookText: string) {
+  return {
+    asset: {
+      type: "html",
+      html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:80px;font-weight:900;color:#FFE135;-webkit-text-stroke:5px #000000;text-align:center;padding:0 60px;line-height:1.1;letter-spacing:1px;margin:0;word-break:break-word;">${escapeHtml(hookText.toUpperCase())}</p>`,
+      width: 1080,
+      height: 360,
+      background: "transparent",
+    },
+    start: 0,
+    length: 1.8,
+    position: "center",
+    offset: { x: 0, y: 0 },
+    transition: { in: "fade", out: "fade" },
+  };
+}
+
+/**
+ * Viral reel composition:
  *
- * Audio strategy:
- * - If voiceoverUrl present: video audio = MUTED (volume 0), voiceover = primary audio via soundtrack
- * - If no voiceover: original video audio plays normally at full volume
+ * Track 0 (top)   — captions + hook text card
+ * Track 1 (mid)   — 1–2 B-roll inserts (2.5s each) mid-clip, faded in/out
+ * Track 2 (base)  — speaker video, portrait-cropped via fit:cover, zoomIn hook
+ *
+ * Audio:
+ * - Voiceover as primary soundtrack (mutes original video audio)
+ * - Original video audio retained when no voiceover is available
+ *
+ * NOTE: scale is intentionally OMITTED — setting scale:0 makes the clip
+ * invisible. fit:"cover" handles all sizing for the 1080×1920 output.
  */
 export async function submitShotstackRender(
   videoUrl: string,
@@ -509,60 +537,68 @@ export async function submitShotstackRender(
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
 
   const env = process.env.SHOTSTACK_ENV ?? "stage";
-  const duration = Math.min(
-    27,
-    Math.max(20, segment.endTime - segment.startTime)
-  );
+  const duration = Math.min(27, Math.max(20, segment.endTime - segment.startTime));
 
+  // ─── Captions + hook card ─────────────────────────────────────────────────
   const captionClips = wordTimings?.length
     ? buildCaptionTrack(wordTimings, duration)
     : [];
 
-  // Track 2 (bottom): original video — always present as base
-  const originalTrack = {
-    clips: [
-      {
-        asset: {
-          type: "video",
-          src: videoUrl,
-          trim: segment.startTime,
-          volume: voiceoverUrl ? 0 : 1.0,
-        },
-        start: 0,
-        length: duration,
-        fit: "cover",
-        scale: 0,
-      },
-    ],
+  // Prepend hook card — shown for first 1.8s, before captions kick in
+  const hookText = (segment.reelScript as { hook?: string } | undefined)?.hook;
+  const overlayClips = hookText
+    ? [buildHookCard(hookText), ...captionClips]
+    : captionClips;
+
+  // ─── Speaker base (Track 2) ───────────────────────────────────────────────
+  // fit:"cover" auto-crops the landscape video to portrait 9:16.
+  // effect:"zoomIn" adds a subtle 105%→100% zoom at the start — stops the scroll.
+  // volume:0 when voiceover present (original audio replaced by ElevenLabs TTS).
+  const speakerClip = {
+    asset: {
+      type: "video",
+      src: videoUrl,
+      trim: segment.startTime,
+      volume: voiceoverUrl ? 0 : 1.0,
+    },
+    start: 0,
+    length: duration,
+    fit: "cover",    // fills 1080×1920 with auto-crop — DO NOT add scale:0
+    effect: "zoomIn", // viral hook energy on first beat
   };
 
-  // Track 1 (middle): B-roll overlay — covers the original video when present
-  const brollTrack = brollUrl
-    ? {
-        clips: [
-          {
-            asset: {
-              type: "video",
-              src: brollUrl,
-              trim: 0,
-              volume: 0, // B-roll is always silent; voiceover handles audio
-            },
-            start: 0,
-            length: duration,
-            fit: "cover",
-            scale: 0,
-          },
-        ],
-      }
-    : null;
+  // ─── B-roll inserts (Track 1) ─────────────────────────────────────────────
+  // Insert 1-2 short B-roll clips mid-clip so the speaker is still seen at
+  // start/end. Faded transitions make them feel edited, not slapped on.
+  const brollClips = [];
+  if (brollUrl) {
+    const insertDur = Math.min(2.5, duration * 0.18); // ~2-2.5s per insert
+    const insert1Start = Math.round(duration * 0.32 * 10) / 10; // ~32% in
+    brollClips.push({
+      asset: { type: "video", src: brollUrl, trim: 0, volume: 0 },
+      start: insert1Start,
+      length: insertDur,
+      fit: "cover",
+      transition: { in: "fade", out: "fade" },
+    });
+    // Second insert if clip is long enough
+    if (duration >= 22) {
+      const insert2Start = Math.round(duration * 0.62 * 10) / 10; // ~62% in
+      brollClips.push({
+        asset: { type: "video", src: brollUrl, trim: insertDur + 0.5, volume: 0 },
+        start: insert2Start,
+        length: insertDur,
+        fit: "cover",
+        transition: { in: "fade", out: "fade" },
+      });
+    }
+  }
 
+  // ─── Timeline assembly ────────────────────────────────────────────────────
   const tracks = [
-    // Track 0 (top): captions
-    { clips: captionClips },
-    // Track 1 (middle): B-roll if available
-    ...(brollTrack ? [brollTrack] : []),
-    // Track 2 (bottom): original video (fallback when no B-roll)
-    originalTrack,
+    { clips: overlayClips },                              // Track 0: captions + hook
+    ...(brollClips.length ? [{ clips: brollClips }] : []), // Track 1: b-roll inserts
+    { clips: [speakerClip] },                             // Track 2: speaker (base)
   ];
 
   const edit: Record<string, unknown> = {
@@ -586,7 +622,7 @@ export async function submitShotstackRender(
   };
 
   console.log(
-    `[shotstack] Submitting render: ${segment.format} | ${duration}s | voiceover=${!!voiceoverUrl} | broll=${!!brollUrl}`
+    `[shotstack] Submitting render: ${segment.format} | ${duration}s | voiceover=${!!voiceoverUrl} | broll=${!!brollUrl} | hook=${!!hookText}`
   );
 
   const res = await fetch(`https://api.shotstack.io/${env}/render`, {
