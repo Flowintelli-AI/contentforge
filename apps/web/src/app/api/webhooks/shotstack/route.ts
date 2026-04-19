@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
 
   try {
-    const submagicRes = await fetch("https://api.submagic.co/v1/projects/magic-clips", {
+    const submagicRes = await fetch("https://api.submagic.co/v1/projects", {
       method: "POST",
       headers: {
         "x-api-key": process.env.SUBMAGIC_API_KEY!,
@@ -57,9 +57,8 @@ export async function POST(req: Request) {
         language: "en",
         videoUrl: body.url,
         webhookUrl: `${appUrl}/api/webhooks/submagic?clipId=${clip.id}`,
-        minClipLength: 20,
-        maxClipLength: 75,
         templateName: "Hormozi 2",
+        hookTitle: true,
       }),
     });
 
