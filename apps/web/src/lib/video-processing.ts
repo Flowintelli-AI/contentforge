@@ -270,9 +270,48 @@ interface PexelsVideo {
   video_files: Array<{ quality: string; width: number; height: number; link: string }>;
 }
 
+// Minimum quality score (0-10) required to include B-roll in the render.
+// Below this threshold the speaker-face-only composition looks cleaner.
+const BROLL_QUALITY_THRESHOLD = 7;
+
+/**
+ * Scores a Pexels video result on a 0-10 scale.
+ *
+ * Scoring rubric:
+ *   Position in results (max 5): 1st=5, 2nd=4, 3rd=3, 4th=2, 5th+=1
+ *   Quality  (max 2):            HD=2,  SD=1,  other=0
+ *   Orientation (max 2):         portrait=2, landscape=0
+ *   Duration  (max 1):           >= minDuration=1, else 0
+ */
+function scoreBrollVideo(
+  video: PexelsVideo,
+  positionIndex: number,
+  minDurationSeconds: number
+): { file: PexelsVideo["video_files"][0] | null; score: number } {
+  const bestFile =
+    video.video_files
+      .filter((f) => f.height > f.width)
+      .sort((a, b) => {
+        const q = (s: string) => (s === "hd" ? 2 : s === "sd" ? 1 : 0);
+        return q(b.quality) - q(a.quality);
+      })[0] ??
+    video.video_files.sort((a, b) => b.width - a.width)[0] ??
+    null;
+
+  if (!bestFile) return { file: null, score: 0 };
+
+  const posScore = Math.max(0, 5 - positionIndex);   // 5→1 by rank
+  const qScore = bestFile.quality === "hd" ? 2 : bestFile.quality === "sd" ? 1 : 0;
+  const orientScore = bestFile.height > bestFile.width ? 2 : 0;
+  const durScore = video.duration >= minDurationSeconds ? 1 : 0;
+
+  return { file: bestFile, score: posScore + qScore + orientScore + durScore };
+}
+
 /**
  * Searches Pexels for a portrait B-roll clip matching the given keywords.
- * Requires PEXELS_API_KEY env var. Returns a direct video URL or null.
+ * Only returns a URL if the best matching video scores >= BROLL_QUALITY_THRESHOLD.
+ * This prevents generic or low-relevance stock footage from diluting the reel.
  */
 export async function fetchPexelsBroll(
   keywords: string[],
@@ -299,43 +338,36 @@ export async function fetchPexelsBroll(
 
   const data = (await res.json()) as { videos: PexelsVideo[] };
 
-  for (const video of data.videos) {
-    if (video.duration < minDurationSeconds) continue;
+  for (let i = 0; i < data.videos.length; i++) {
+    const video = data.videos[i];
+    const { file, score } = scoreBrollVideo(video, i, minDurationSeconds);
 
-    // Prefer portrait HD/SD, fall back to any portrait file
-    const file = video.video_files
-      .filter((f) => f.height > f.width) // portrait only
-      .sort((a, b) => {
-        const score = (q: string) => (q === "hd" ? 2 : q === "sd" ? 1 : 0);
-        return score(b.quality) - score(a.quality);
-      })[0];
+    if (!file) continue;
 
-    if (file) {
-        // Validate that Shotstack's rendering servers can actually reach this URL.
-        // Pexels sometimes returns Vimeo CDN links that block non-browser requests.
-        try {
-          const headRes = await fetch(file.link, { method: "HEAD" });
-          if (!headRes.ok) {
-            console.warn(`[broll] URL not reachable (${headRes.status}), trying next video`);
-            continue;
-          }
-        } catch {
-          console.warn("[broll] HEAD request failed, trying next video");
-          continue;
-        }
-        console.log(`[broll] ✅ Found: ${file.quality} ${file.width}x${file.height}`);
-        return file.link;
+    if (score < BROLL_QUALITY_THRESHOLD) {
+      console.log(`[broll] Skipping video[${i}] "${query}" score=${score}/${10} (< threshold ${BROLL_QUALITY_THRESHOLD})`);
+      // Still try next candidate — maybe it scores higher
+      continue;
+    }
+
+    // Validate that Shotstack's rendering servers can actually reach this URL.
+    // Pexels sometimes returns Vimeo CDN links that block non-browser requests.
+    try {
+      const headRes = await fetch(file.link, { method: "HEAD" });
+      if (!headRes.ok) {
+        console.warn(`[broll] URL not reachable (${headRes.status}), trying next`);
+        continue;
       }
+    } catch {
+      console.warn("[broll] HEAD request failed, trying next");
+      continue;
+    }
+
+    console.log(`[broll] ✅ Accepted: score=${score}/10 ${file.quality} ${file.width}x${file.height} pos=${i}`);
+    return file.link;
   }
 
-  // Retry without portrait filter if nothing found
-  const anyFile = data.videos[0]?.video_files.sort((a, b) => b.width - a.width)[0];
-  if (anyFile) {
-    console.log(`[broll] ✅ Fallback (non-portrait): ${anyFile.link.slice(0, 60)}...`);
-    return anyFile.link;
-  }
-
-  console.warn(`[broll] No suitable clip found for "${query}"`);
+  console.warn(`[broll] No video met quality threshold ${BROLL_QUALITY_THRESHOLD} for "${query}" — omitting B-roll`);
   return null;
 }
 
@@ -447,64 +479,91 @@ export async function selectBestSegments(
 // ─── Shotstack ────────────────────────────────────────────────────────────────
 
 /**
- * Kinetic 2-word captions synced to ElevenLabs word-level timestamps.
- * Each group flashes on screen for exactly the duration those words are spoken.
- * Alternates white / yellow — the viral TikTok / Reels caption standard.
- * Impact font + black stroke = maximum legibility on any background.
+ * Karaoke-style captions synced to ElevenLabs word-level timestamps.
+ *
+ * Groups words into "lines" of up to WORDS_PER_LINE words.
+ * For each word in a line, a Shotstack clip renders the ENTIRE line with
+ * the CURRENT word highlighted in yellow and all other words in white.
+ * This creates the word-by-word highlight effect seen on viral TikToks.
+ *
+ * Transitions: only the first word in each line fades in, and only the
+ * last word in each line fades out — avoids glitchy micro-fades per word.
  */
 function buildCaptionTrack(wordTimings: WordTiming[], duration: number) {
   if (!wordTimings.length) return [];
 
-  const WORDS_PER_GROUP = 2; // 2-word groups = faster, more energetic cadence
-  const MIN_DISPLAY = 0.2;
+  const WORDS_PER_LINE = 4; // words visible at once
+  const MIN_WORD_DISPLAY = 0.08; // floor for very short words
 
-  const captions = [];
-  for (let i = 0; i < wordTimings.length; i += WORDS_PER_GROUP) {
-    const group = wordTimings.slice(i, i + WORDS_PER_GROUP);
-    const text = group.map((w) => w.word).join(" ").toUpperCase();
-    const start = group[0].start;
-    const end = Math.min(group[group.length - 1].end, duration);
-    const length = Math.max(end - start, MIN_DISPLAY);
+  const clips = [];
 
-    // Every 3rd group yellow — creates rhythm without being distracting
-    const groupIndex = Math.floor(i / WORDS_PER_GROUP);
-    const isYellow = groupIndex % 3 === 2;
-    const color = isYellow ? "#FFE135" : "#FFFFFF";
+  // Split into lines
+  for (let lineStart = 0; lineStart < wordTimings.length; lineStart += WORDS_PER_LINE) {
+    const lineWords = wordTimings.slice(lineStart, lineStart + WORDS_PER_LINE);
 
-    captions.push({
-      asset: {
-        type: "html",
-        html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:105px;font-weight:900;color:${color};-webkit-text-stroke:6px #000000;text-align:center;padding:0 40px;line-height:1.05;letter-spacing:1px;margin:0;word-break:break-word;">${escapeHtml(text)}</p>`,
-        width: 1080,
-        height: 240,
-        background: "transparent",
-      },
-      start,
-      length,
-      position: "bottom",
-      offset: { x: 0, y: 0.14 },
-      transition: { in: "fade", out: "fade" },
-    });
+    for (let wi = 0; wi < lineWords.length; wi++) {
+      const word = lineWords[wi];
+      const isFirstInLine = wi === 0;
+      const isLastInLine = wi === lineWords.length - 1;
+
+      // Clip spans from this word's start to the next word's start (or end of last word)
+      const start = word.start;
+      const rawEnd = isLastInLine
+        ? Math.min(lineWords[wi].end, duration)
+        : lineWords[wi + 1].start;
+      const length = Math.max(rawEnd - start, MIN_WORD_DISPLAY);
+
+      // Build HTML: each word in the line, highlight the active one
+      const wordSpans = lineWords
+        .map((w, idx) => {
+          const isActive = idx === wi;
+          if (isActive) {
+            // Active word: yellow + bold stroke + slight scale-up effect via font-size bump
+            return `<span style="color:#FFE135;-webkit-text-stroke:5px #000000;font-size:108px;">${escapeHtml(w.word.toUpperCase())}</span>`;
+          }
+          return `<span style="color:#FFFFFF;-webkit-text-stroke:4px #000000;opacity:0.75;">${escapeHtml(w.word.toUpperCase())}</span>`;
+        })
+        .join(" ");
+
+      const html = `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:95px;font-weight:900;text-align:center;padding:0 40px;line-height:1.1;letter-spacing:0px;margin:0;word-break:break-word;">${wordSpans}</p>`;
+
+      clips.push({
+        asset: {
+          type: "html",
+          html,
+          width: 1080,
+          height: 260,
+          background: "transparent",
+        },
+        start,
+        length,
+        position: "bottom",
+        offset: { x: 0, y: 0.12 },
+        ...(isFirstInLine ? { transition: { in: "fade" } } : {}),
+        ...(isLastInLine ? { transition: { out: "fade" } } : {}),
+      });
+    }
   }
 
-  return captions;
+  return clips;
 }
 
 /**
- * Builds a hook text card shown at the very start of the clip (0 → 1.8s).
+ * Builds a hook text card shown at the very start of the clip (0 → 2.0s).
  * Large bold text that stops the scroll before the speaker even appears.
+ * Centered, full-width — impossible to miss.
  */
 function buildHookCard(hookText: string) {
   return {
     asset: {
       type: "html",
-      html: `<p style="font-family:Impact,'Arial Black',sans-serif;font-size:80px;font-weight:900;color:#FFE135;-webkit-text-stroke:5px #000000;text-align:center;padding:0 60px;line-height:1.1;letter-spacing:1px;margin:0;word-break:break-word;">${escapeHtml(hookText.toUpperCase())}</p>`,
+      html: `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:rgba(0,0,0,0.55);padding:60px 60px;box-sizing:border-box;"><p style="font-family:Impact,'Arial Black',sans-serif;font-size:88px;font-weight:900;color:#FFE135;-webkit-text-stroke:5px #000000;text-align:center;line-height:1.1;letter-spacing:1px;margin:0;word-break:break-word;">${escapeHtml(hookText.toUpperCase())}</p></div>`,
       width: 1080,
-      height: 360,
+      height: 1920,
       background: "transparent",
     },
     start: 0,
-    length: 1.8,
+    length: 2.0,
     position: "center",
     offset: { x: 0, y: 0 },
     transition: { in: "fade", out: "fade" },
@@ -537,17 +596,30 @@ export async function submitShotstackRender(
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
 
   const env = process.env.SHOTSTACK_ENV ?? "stage";
-  const duration = Math.min(27, Math.max(20, segment.endTime - segment.startTime));
+
+  // ─── Duration = actual voiceover audio length ─────────────────────────────
+  // Use the last word's end time from ElevenLabs — this is the exact moment
+  // the audio stops. The video track is trimmed to this length so the clip
+  // ends exactly when the speaker finishes, not arbitrarily.
+  const audioDuration = wordTimings?.length
+    ? wordTimings[wordTimings.length - 1].end + 0.3 // +0.3s tail before cut
+    : segment.endTime - segment.startTime;
+  const duration = Math.min(60, Math.max(10, audioDuration));
 
   // ─── Captions + hook card ─────────────────────────────────────────────────
   const captionClips = wordTimings?.length
     ? buildCaptionTrack(wordTimings, duration)
     : [];
 
-  // Prepend hook card — shown for first 1.8s, before captions kick in
+  // Hook card — shown for first 2s. The narration script always opens with the
+  // hook phrase, so the hook card is visible while those words are being spoken.
+  // Captions are NOT shifted — they run from t=0 in sync with the audio.
+  // Hook card occupies center-screen; captions are at the bottom — no conflict.
   const hookText = (segment.reelScript as { hook?: string } | undefined)?.hook;
-  const overlayClips = hookText
-    ? [buildHookCard(hookText), ...captionClips]
+  const hookCard = hookText ? buildHookCard(hookText) : null;
+
+  const overlayClips = hookCard
+    ? [hookCard, ...captionClips]
     : captionClips;
 
   // ─── Speaker base (Track 2) ───────────────────────────────────────────────
