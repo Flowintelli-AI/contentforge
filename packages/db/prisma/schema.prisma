@@ -1,4 +1,4 @@
-﻿// ContentForge – Prisma Schema
+// ContentForge – Prisma Schema
 // Stack: PostgreSQL via Supabase / Neon
 
 generator client {
