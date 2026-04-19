@@ -65,9 +65,17 @@ interface ViralMomentsResult {
   missing: MissingFramework[];
 }
 
+// Words that should never be the last word of a clip — they signal an incomplete thought
+const DANGLING_WORDS = new Set([
+  "and", "but", "so", "because", "the", "a", "an", "that", "which",
+  "who", "or", "if", "when", "then", "as", "with", "to", "in", "on",
+  "at", "by", "for", "of", "from", "about", "into", "i", "we", "you",
+  "this", "these", "those", "it", "its", "their", "our", "your",
+]);
+
 /** Snap a GPT-chosen time (seconds) to the nearest real word boundary.
- *  mode "start" → find the word whose start is closest at-or-after targetSec
- *  mode "end"   → find the word whose END is closest at-or-before targetSec, then add 0.25s buffer
+ *  mode "start" → word whose start is closest at-or-after targetSec
+ *  mode "end"   → last word ending at-or-before targetSec, then extend if it's a dangling word
  */
 function snapToWordBoundary(
   words: AssemblyAIWord[],
@@ -76,26 +84,37 @@ function snapToWordBoundary(
 ): number {
   const targetMs = targetSec * 1000;
   if (mode === "start") {
-    // Find first word that starts at or after target, fallback to closest word start
     const after = words.find((w) => w.start >= targetMs);
     if (after) return after.start / 1000;
-    // fallback: closest
     const closest = words.reduce((a, b) =>
       Math.abs(a.start - targetMs) <= Math.abs(b.start - targetMs) ? a : b
     );
     return closest.start / 1000;
   } else {
-    // Find last word that ends at or before target
-    const candidates = words.filter((w) => w.end <= targetMs);
-    if (candidates.length > 0) {
-      const lastWord = candidates[candidates.length - 1];
-      return lastWord.end / 1000 + 0.25; // tiny buffer so last syllable isn't clipped
+    // Find last word ending at or before target
+    const candidates = words.filter((w) => w.end <= targetMs + 350);
+    const lastWord = candidates.length > 0
+      ? candidates[candidates.length - 1]
+      : words.reduce((a, b) => Math.abs(a.end - targetMs) <= Math.abs(b.end - targetMs) ? a : b);
+
+    const snappedSec = lastWord.end / 1000 + 0.25;
+
+    // Guard: if the last word is a dangling connector, extend to the next sentence boundary
+    const lastText = lastWord.text.replace(/[^a-zA-Z]/g, "").toLowerCase();
+    if (!DANGLING_WORDS.has(lastText)) return snappedSec;
+
+    const lastIdx = words.indexOf(lastWord);
+    for (let i = lastIdx + 1; i < words.length; i++) {
+      const w = words[i];
+      const hasPunctuation = /[.!?]$/.test(w.text);
+      const nextWord = words[i + 1];
+      const hasLongPause = !nextWord || (nextWord.start - w.end) > 500;
+      if (hasPunctuation || hasLongPause) return w.end / 1000 + 0.25;
+      // Don't extend more than 6 extra seconds
+      if (w.start - (lastWord.end) > 6000) break;
     }
-    // fallback: closest word end
-    const closest = words.reduce((a, b) =>
-      Math.abs(a.end - targetMs) <= Math.abs(b.end - targetMs) ? a : b
-    );
-    return closest.end / 1000 + 0.25;
+
+    return snappedSec; // couldn't find better boundary, keep snapped
   }
 }
 
@@ -144,10 +163,18 @@ Analyze this transcript and try to find moments matching 6 specific viral framew
    Look for: Any content with 2+ distinct tips/points that can be delivered quickly
 
 ## RULES:
-- start and end times MUST land on COMPLETE sentence boundaries (never cut mid-sentence)
+- **#1 RULE — COMPLETE THE THOUGHT.** Never cut mid-sentence, mid-clause, or on a connector word (and, but, so, because, the, a, etc.). A clip that runs 2-3 seconds past the framework max to finish the idea is always better than one that ends on an incomplete thought.
+- start and end times must land on full sentence boundaries. If the natural sentence end is slightly past the max, use that end time anyway.
 - Every clip must make 100% sense with ZERO context from the rest of the video
-- For MISSING frameworks: write a personalized script using the speaker's actual topic, niche, vocabulary, and tone from the transcript — make it feel native to their voice, not generic
-- Suggested scripts should be the exact words the user can read on camera
+- For MISSING frameworks: write a COMPLETE narration script using the speaker's exact topic, niche vocabulary, and tone. Write the actual words — NEVER use bracket placeholders like [insert X here].
+- Each script must end on a complete sentence with terminal punctuation (. ! ?)
+- Use the word counts below as a guide, not a hard limit. Always finish the thought:
+  * pattern_interrupt: ~30 words (8–18 s target range)
+  * hot_take: ~25 words (7–15 s target range)
+  * relatable_hook: ~22 words (7–12 s target range)
+  * before_after: ~35 words (10–20 s target range)
+  * open_loop: ~43 words (12–25 s target range)
+  * list_format: ~52 words (15–30 s target range)
 
 Return ONLY valid JSON, no markdown, no explanation:
 {
@@ -167,7 +194,7 @@ Return ONLY valid JSON, no markdown, no explanation:
       "framework": "hot_take",
       "platform": "tiktok",
       "reason": "No strong controversial opinions or polarizing statements found in this content",
-      "suggestedScript": "Stop [doing X specific to their topic] if you want [result]. Everyone tells you to [common advice]. That's exactly wrong. [Their specific insight]. That's the real game."
+      "suggestedScript": "Stop optimizing for likes. Likes do not pay your bills. The creators actually scaling their revenue track one metric: click-through on the link in bio. Vanity metrics are the enemy of real growth. Measure what converts, ignore everything else."
     }
   ]
 }`;
@@ -190,7 +217,9 @@ Return ONLY valid JSON, no markdown, no explanation:
     const fw = FRAMEWORKS.find((f) => f.id === clip.framework);
     if (!fw) return false;
     const dur = clip.end - clip.start;
-    return clip.score >= 70 && dur >= fw.minSec * 0.8 && dur <= fw.maxSec * 1.2;
+    // Allow up to 1.5× the max — a clip that runs 2-3s long to finish a complete thought
+    // is always better than one cut mid-sentence at the hard max
+    return clip.score >= 70 && dur >= fw.minSec * 0.8 && dur <= fw.maxSec * 1.5;
   });
 
   return result;
@@ -372,41 +401,49 @@ export async function POST(req: Request) {
     }
   }
 
-  // Create SCRIPT_NEEDED clips with personalized scripts for missing frameworks
+  // Create GENERATING_AI clips for missing frameworks — AI fill pipeline handles the rest
+  let aiQueued = 0;
   for (const missing of result.missing) {
     const fw = FRAMEWORKS.find((f) => f.id === missing.framework);
     if (!fw) continue;
+
+    // Target the midpoint of the framework's duration range
+    const targetDuration = Math.round((fw.minSec + fw.maxSec) / 2);
 
     try {
       await db.repurposedClip.create({
         data: {
           videoId,
           title: fw.name,
-          status: "SCRIPT_NEEDED",
+          duration: targetDuration,
+          status: "GENERATING_AI",
           platform: fw.platform,
           format: missing.framework,
           reelScript: {
             suggestedScript: missing.suggestedScript,
             reason: missing.reason,
             frameworkName: fw.name,
-            targetLength: `${fw.minSec}-${fw.maxSec}s`,
+            targetSec: targetDuration,
+            minSec: fw.minSec,
+            maxSec: fw.maxSec,
           },
           hashtags: [],
         },
       });
 
       console.log(
-        `[assemblyai] SCRIPT_NEEDED framework=${missing.framework} platform=${fw.platform} reason="${missing.reason}"`
+        `[assemblyai] GENERATING_AI framework=${missing.framework} platform=${fw.platform} targetDuration=${targetDuration}s`
       );
+      aiQueued++;
     } catch (err) {
       console.error(
-        `[assemblyai] failed to create script-needed record for ${missing.framework}:`, err
+        `[assemblyai] failed to create ai-fill record for ${missing.framework}:`, err
       );
     }
   }
 
   console.log(
-    `[assemblyai] video=${videoId}: ${submitted} Shotstack renders submitted, ${result.missing.length} script suggestions created`
+    `[assemblyai] video=${videoId}: ${submitted} Shotstack renders submitted, ${aiQueued} AI fill clips queued`
   );
-  return NextResponse.json({ ok: true, submitted, scriptNeeded: result.missing.length });
+  return NextResponse.json({ ok: true, submitted, aiQueued });
 }

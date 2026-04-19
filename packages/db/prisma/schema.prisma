@@ -67,6 +67,7 @@ enum ClipStatus {
   READY
   FAILED
   SCRIPT_NEEDED
+  GENERATING_AI
 }
 
 enum PostStatus {
