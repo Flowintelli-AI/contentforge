@@ -27,6 +27,7 @@ interface AssemblyAITranscript {
 }
 
 interface SelectedSegment {
+  type: "hook" | "value";
   start: number; // seconds
   end: number;   // seconds
   title: string;
@@ -34,36 +35,59 @@ interface SelectedSegment {
   score: number;
 }
 
-async function selectViralSegments(
+async function selectViralMoments(
   transcriptText: string,
   words: AssemblyAIWord[]
 ): Promise<SelectedSegment[]> {
-  // Build timed transcript: one line per ~10 words with start timestamp
+  // Build timed transcript: one line per ~8 words with start timestamp
   const lines: string[] = [];
-  for (let i = 0; i < words.length; i += 10) {
-    const chunk = words.slice(i, i + 10);
+  for (let i = 0; i < words.length; i += 8) {
+    const chunk = words.slice(i, i + 8);
     const startSec = (chunk[0].start / 1000).toFixed(1);
     lines.push(`[${startSec}s] ${chunk.map((w) => w.text).join(" ")}`);
   }
 
-  const systemPrompt = `You are a world-class viral short-form video strategist.
-Given a transcript with timestamps, identify the 3 best CONTINUOUS segments (45–75 seconds each) for standalone reels.
+  const systemPrompt = `You are a viral short-form video strategist specializing in TikTok/Reels algorithm optimization in 2026.
 
-Each segment MUST:
-1. Open with a natural hook — bold claim, surprising fact, direct question, or relatable problem
-2. Build tension or curiosity that keeps viewers watching
-3. Deliver a clear payoff — insight, advice, memorable quote, or story resolution
-4. End at a natural sentence boundary (not mid-sentence or mid-thought)
+The algorithm rewards: completion rate (most important) → replays/loops → shares + saves.
 
-Score each segment 0–100:
-- Hook strength (0-25): How compelling is the opening line?
-- Narrative arc (0-25): Does it have tension → resolution?
-- Quotability (0-25): Is there a memorable shareable takeaway?
-- Standalone clarity (0-25): Makes sense without full video context?
+Given a transcript with timestamps, find the best MICRO-MOMENTS for viral short clips.
 
-Return ONLY valid JSON array, no markdown, no explanation:
+## Format 1: VIRAL HOOKS (6–10 seconds each) — find 3
+Single punchy statements that STOP THE SCROLL. Target 8 seconds.
+Algorithm: 6-10s clips get 120-200% watch rate because they loop automatically.
+Look for:
+- Contrarian takes: "Stop doing X if you want Y"
+- Strong claims: "Most people don't realize this..."
+- Curiosity gaps: "This is exactly why you're failing at..."
+- Pattern interrupts: surprising, counterintuitive, bold
+- LOOP TRIGGER: last line flows naturally back to first line
+
+## Format 2: VALUE CLIPS (12–20 seconds each) — find 3
+Quick setup + payoff. Builds authority, drives saves. Target 15 seconds.
+Look for:
+- Problem + solution delivered in one breath
+- Specific actionable tip with a stated result
+- Counterintuitive insight + brief explanation
+- Ends with a memorable, quotable, saveable line
+
+CRITICAL RULES:
+- start/end MUST land on COMPLETE sentence boundaries (never cut mid-sentence)
+- Hooks: 6–10 seconds ONLY
+- Value clips: 12–20 seconds ONLY
+- Every clip must make 100% sense with ZERO context from the full video
+- Hook clips must feel loopable — viewer watches it twice without realizing
+
+Return ONLY valid JSON array, no markdown:
 [
-  { "start": <seconds_float>, "end": <seconds_float>, "title": "<4-8 word compelling title>", "hook": "<exact opening line>", "score": <0-100> }
+  {
+    "type": "hook",
+    "start": <seconds_float>,
+    "end": <seconds_float>,
+    "title": "<punchy 4-6 word title>",
+    "hook": "<exact opening line>",
+    "score": <0-100>
+  }
 ]`;
 
   const response = await openai.chat.completions.create({
@@ -76,15 +100,20 @@ Return ONLY valid JSON array, no markdown, no explanation:
   });
 
   const raw = response.choices[0]?.message?.content?.trim() ?? "[]";
-  // Strip markdown code fences if present
   const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-  const segments = JSON.parse(cleaned) as SelectedSegment[];
+  const moments = JSON.parse(cleaned) as SelectedSegment[];
 
-  return segments
-    .filter((s) => s.end - s.start >= 30) // must be at least 30s
-    .map((s) => ({ ...s, end: Math.min(s.end, s.start + 75) })) // cap at 75s
+  const hooks = moments
+    .filter((m) => m.type === "hook" && m.end - m.start >= 5 && m.end - m.start <= 12)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
+
+  const valueClips = moments
+    .filter((m) => m.type === "value" && m.end - m.start >= 10 && m.end - m.start <= 22)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  return [...hooks, ...valueClips];
 }
 
 async function submitShotstackTrim(
@@ -191,13 +220,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // GPT selects top 3 cohesive narrative segments
+  // GPT selects 3 viral hooks (6-10s) + 3 value clips (12-20s)
   let segments: SelectedSegment[];
   try {
-    segments = await selectViralSegments(transcript.text, transcript.words);
+    segments = await selectViralMoments(transcript.text, transcript.words);
     console.log(
-      `[assemblyai] GPT selected ${segments.length} segments for video=${videoId}:`,
-      segments.map((s) => `"${s.title}" ${s.start}s–${s.end}s score=${s.score}`)
+      `[assemblyai] GPT selected ${segments.length} micro-moments for video=${videoId}: ${segments.filter(s => s.type === 'hook').length} hooks, ${segments.filter(s => s.type === 'value').length} value clips`
     );
   } catch (err) {
     console.error(`[assemblyai] GPT segment selection failed for video=${videoId}:`, err);
@@ -227,7 +255,7 @@ export async function POST(req: Request) {
           startTime: Math.round(seg.start),
           endTime: Math.round(seg.end),
           status: "PROCESSING",
-          hashtags: [],
+          hashtags: [seg.type], // "hook" or "value" — used for UI badge
         },
       });
 
