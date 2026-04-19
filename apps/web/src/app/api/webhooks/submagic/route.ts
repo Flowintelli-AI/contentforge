@@ -23,26 +23,21 @@ interface SubmagicWebhookPayload {
 
 export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
-  const videoId = searchParams.get("videoId");
-
-  if (!videoId) {
-    return NextResponse.json({ error: "Missing videoId" }, { status: 400 });
-  }
+  const clipId = searchParams.get("clipId");   // hybrid pipeline: per-clip webhook
+  const videoId = searchParams.get("videoId"); // legacy: per-video webhook
 
   const payload = (await req.json()) as SubmagicWebhookPayload;
   console.log(
-    `[submagic] webhook for video ${videoId}: status=${payload.status}, projectId=${payload.projectId}`
+    `[submagic] webhook clipId=${clipId ?? "-"} videoId=${videoId ?? "-"} status=${payload.status} projectId=${payload.projectId}`
   );
 
   if (payload.status === "failed") {
-    console.error(
-      `[submagic] processing failed for video ${videoId}:`,
-      payload.error ?? "unknown error"
-    );
-    await db.uploadedVideo.update({
-      where: { id: videoId },
-      data: { status: "READY" },
-    });
+    console.error(`[submagic] failed:`, payload.error ?? "unknown");
+    if (clipId) {
+      await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+    } else if (videoId) {
+      await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
+    }
     return NextResponse.json({ ok: true });
   }
 
@@ -50,51 +45,76 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Idempotency: skip if clips already exist for this video
-  const existingClips = await db.repurposedClip.count({ where: { videoId } });
-  if (existingClips > 0) {
-    console.log(
-      `[submagic] video ${videoId} already has ${existingClips} clips, skipping duplicate webhook`
-    );
+  // --- Hybrid pipeline: per-clip webhook ---
+  if (clipId) {
+    // Submagic may return multiple sub-clips from our already-trimmed segment.
+    // Take only the first (highest-scored) result.
+    const best = payload.clips[0];
+    if (!best) return NextResponse.json({ ok: true });
+
+    await db.repurposedClip.update({
+      where: { id: clipId },
+      data: {
+        storagePath: best.videoUrl,
+        thumbnailUrl: best.thumbnailUrl ?? null,
+        opusClipId: best.clipId,
+        status: "READY",
+      },
+    });
+    console.log(`[submagic] clip=${clipId} READY → ${best.videoUrl}`);
+
+    // Mark parent video READY when all its clips are no longer PROCESSING
+    const clip = await db.repurposedClip.findUnique({ where: { id: clipId } });
+    if (clip) {
+      const stillProcessing = await db.repurposedClip.count({
+        where: { videoId: clip.videoId, status: "PROCESSING" },
+      });
+      if (stillProcessing === 0) {
+        await db.uploadedVideo.update({
+          where: { id: clip.videoId },
+          data: { status: "READY" },
+        });
+        console.log(`[submagic] all clips done → video=${clip.videoId} READY`);
+      }
+    }
+
     return NextResponse.json({ ok: true });
   }
 
-  const results = await Promise.allSettled(
-    payload.clips.map((clip, idx) =>
-      db.repurposedClip.create({
-        data: {
-          videoId,
-          title: clip.title ?? `Clip ${idx + 1}`,
-          storagePath: clip.videoUrl,
-          thumbnailUrl: clip.thumbnailUrl,
-          duration: Math.round(clip.duration),
-          startTime: clip.start,
-          endTime: clip.end,
-          opusClipId: clip.clipId,
-          status: "READY",
-          hashtags: [],
-        },
-      })
-    )
-  );
+  // --- Legacy: full-video webhook (backwards compat) ---
+  if (videoId) {
+    const existingClips = await db.repurposedClip.count({ where: { videoId } });
+    if (existingClips > 0) {
+      console.log(`[submagic] video=${videoId} already has ${existingClips} clips, skipping`);
+      return NextResponse.json({ ok: true });
+    }
 
-  const succeeded = results.filter((r) => r.status === "fulfilled").length;
-  const failed = results
-    .filter((r) => r.status === "rejected")
-    .map((r) => (r as PromiseRejectedResult).reason);
+    const results = await Promise.allSettled(
+      payload.clips.map((clip, idx) =>
+        db.repurposedClip.create({
+          data: {
+            videoId,
+            title: clip.title ?? `Clip ${idx + 1}`,
+            storagePath: clip.videoUrl,
+            thumbnailUrl: clip.thumbnailUrl ?? null,
+            duration: Math.round(clip.duration),
+            startTime: clip.start,
+            endTime: clip.end,
+            opusClipId: clip.clipId,
+            status: "READY",
+            hashtags: [],
+          },
+        })
+      )
+    );
 
-  if (failed.length > 0) {
-    console.warn(`[submagic] ${failed.length} clip(s) failed to save:`, failed);
+    const succeeded = results.filter((r) => r.status === "fulfilled").length;
+    console.log(
+      `[submagic] legacy video=${videoId}: ${succeeded}/${payload.clips.length} clips created`
+    );
+    await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
+    return NextResponse.json({ ok: true, clipsCreated: succeeded });
   }
 
-  console.log(
-    `[submagic] video ${videoId}: ${succeeded}/${payload.clips.length} clips created`
-  );
-
-  await db.uploadedVideo.update({
-    where: { id: videoId },
-    data: { status: "READY" },
-  });
-
-  return NextResponse.json({ ok: true, clipsCreated: succeeded });
+  return NextResponse.json({ error: "Missing clipId or videoId" }, { status: 400 });
 }
