@@ -65,6 +65,40 @@ interface ViralMomentsResult {
   missing: MissingFramework[];
 }
 
+/** Snap a GPT-chosen time (seconds) to the nearest real word boundary.
+ *  mode "start" → find the word whose start is closest at-or-after targetSec
+ *  mode "end"   → find the word whose END is closest at-or-before targetSec, then add 0.25s buffer
+ */
+function snapToWordBoundary(
+  words: AssemblyAIWord[],
+  targetSec: number,
+  mode: "start" | "end"
+): number {
+  const targetMs = targetSec * 1000;
+  if (mode === "start") {
+    // Find first word that starts at or after target, fallback to closest word start
+    const after = words.find((w) => w.start >= targetMs);
+    if (after) return after.start / 1000;
+    // fallback: closest
+    const closest = words.reduce((a, b) =>
+      Math.abs(a.start - targetMs) <= Math.abs(b.start - targetMs) ? a : b
+    );
+    return closest.start / 1000;
+  } else {
+    // Find last word that ends at or before target
+    const candidates = words.filter((w) => w.end <= targetMs);
+    if (candidates.length > 0) {
+      const lastWord = candidates[candidates.length - 1];
+      return lastWord.end / 1000 + 0.25; // tiny buffer so last syllable isn't clipped
+    }
+    // fallback: closest word end
+    const closest = words.reduce((a, b) =>
+      Math.abs(a.end - targetMs) <= Math.abs(b.end - targetMs) ? a : b
+    );
+    return closest.end / 1000 + 0.25;
+  }
+}
+
 async function analyzeViralFrameworks(
   transcriptText: string,
   words: AssemblyAIWord[]
@@ -292,16 +326,22 @@ export async function POST(req: Request) {
   for (const found of result.clips) {
     const fw = FRAMEWORKS.find((f) => f.id === found.framework);
     if (!fw) continue;
-    const durationSec = Math.round(found.end - found.start);
+
+    // Snap GPT timestamps to actual word boundaries to avoid mid-word cuts
+    const snappedStart = snapToWordBoundary(transcript.words!, found.start, "start");
+    const snappedEnd   = snapToWordBoundary(transcript.words!, found.end,   "end");
+    const durationSec  = Math.max(1, snappedEnd - snappedStart);
+
+    console.log(`[assemblyai] ${found.framework} raw=${found.start}s-${found.end}s → snapped=${snappedStart.toFixed(2)}s-${snappedEnd.toFixed(2)}s (${durationSec.toFixed(2)}s)`);
 
     try {
       const clip = await db.repurposedClip.create({
         data: {
           videoId,
           title: found.title,
-          duration: durationSec,
-          startTime: found.start,
-          endTime: found.end,
+          duration: Math.round(durationSec),
+          startTime: snappedStart,
+          endTime: snappedEnd,
           status: "PROCESSING",
           platform: fw.platform,
           format: found.framework,
@@ -311,7 +351,7 @@ export async function POST(req: Request) {
 
       const renderId = await submitShotstackTrim(
         video.storagePath,
-        found.start,
+        snappedStart,
         durationSec,
         `${appUrl}/api/webhooks/shotstack?clipId=${clip.id}`
       );

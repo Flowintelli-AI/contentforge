@@ -3,22 +3,15 @@ import { NextResponse } from "next/server";
 
 export const maxDuration = 60;
 
-interface SubmagicClip {
-  clipId: string;
-  title: string;
-  start: number;
-  end: number;
-  duration: number;
-  videoUrl: string;
-  thumbnailUrl?: string;
-  captionsUrl?: string;
-}
+// Loose types — Submagic API field names may vary by plan/version
+type SubmagicPayload = Record<string, unknown>;
+type SubmagicClipRaw = Record<string, unknown>;
 
-interface SubmagicWebhookPayload {
-  projectId: string;
-  status: "completed" | "failed" | "processing";
-  clips?: SubmagicClip[];
-  error?: string;
+function getStr(obj: SubmagicPayload | SubmagicClipRaw, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    if (typeof obj[k] === "string" && obj[k]) return obj[k] as string;
+  }
+  return undefined;
 }
 
 export async function POST(req: Request) {
@@ -26,13 +19,18 @@ export async function POST(req: Request) {
   const clipId = searchParams.get("clipId");   // hybrid pipeline: per-clip webhook
   const videoId = searchParams.get("videoId"); // legacy: per-video webhook
 
-  const payload = (await req.json()) as SubmagicWebhookPayload;
+  const payload = (await req.json()) as SubmagicPayload;
+  // Log full raw payload so we can see the actual structure
   console.log(
-    `[submagic] webhook clipId=${clipId ?? "-"} videoId=${videoId ?? "-"} status=${payload.status} projectId=${payload.projectId}`
+    `[submagic] webhook clipId=${clipId ?? "-"} videoId=${videoId ?? "-"} raw=`,
+    JSON.stringify(payload)
   );
 
-  if (payload.status === "failed") {
-    console.error(`[submagic] failed:`, payload.error ?? "unknown");
+  const status = getStr(payload, "status") as string | undefined;
+  const errorMsg = getStr(payload, "error", "message", "errorMessage");
+
+  if (status === "failed") {
+    console.error(`[submagic] failed:`, errorMsg ?? "unknown");
     if (clipId) {
       await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
     } else if (videoId) {
@@ -41,27 +39,46 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  if (payload.status !== "completed" || !payload.clips?.length) {
+  if (status !== "completed") {
+    console.log(`[submagic] status=${status}, ignoring`);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Clips array — try common field names
+  const rawClips = (
+    Array.isArray(payload.clips) ? payload.clips :
+    Array.isArray(payload.results) ? payload.results :
+    Array.isArray(payload.data) ? payload.data :
+    []
+  ) as SubmagicClipRaw[];
+
+  if (!rawClips.length) {
+    console.warn(`[submagic] status=completed but no clips array found in payload`);
     return NextResponse.json({ ok: true });
   }
 
   // --- Hybrid pipeline: per-clip webhook ---
   if (clipId) {
-    // Submagic may return multiple sub-clips from our already-trimmed segment.
-    // Take only the first (highest-scored) result.
-    const best = payload.clips[0];
-    if (!best) return NextResponse.json({ ok: true });
+    const best = rawClips[0];
+    const videoUrl   = getStr(best, "videoUrl", "video_url", "url", "mp4Url", "outputUrl");
+    const thumbUrl   = getStr(best, "thumbnailUrl", "thumbnail_url", "thumbnail", "thumb");
+    const clipRefId  = getStr(best, "clipId", "clip_id", "id", "projectId");
+
+    if (!videoUrl) {
+      console.error(`[submagic] clip=${clipId} completed but no videoUrl in:`, JSON.stringify(best));
+      return NextResponse.json({ ok: true });
+    }
 
     await db.repurposedClip.update({
       where: { id: clipId },
       data: {
-        storagePath: best.videoUrl,
-        thumbnailUrl: best.thumbnailUrl ?? null,
-        opusClipId: best.clipId,
+        storagePath: videoUrl,
+        thumbnailUrl: thumbUrl ?? null,
+        opusClipId: clipRefId ?? null,
         status: "READY",
       },
     });
-    console.log(`[submagic] clip=${clipId} READY → ${best.videoUrl}`);
+    console.log(`[submagic] clip=${clipId} READY → ${videoUrl}`);
 
     // Mark parent video READY when all its clips are no longer PROCESSING
     const clip = await db.repurposedClip.findUnique({ where: { id: clipId } });
@@ -90,22 +107,30 @@ export async function POST(req: Request) {
     }
 
     const results = await Promise.allSettled(
-      payload.clips.map((clip, idx) =>
-        db.repurposedClip.create({
+      rawClips.map((clip, idx) => {
+        const vUrl = getStr(clip, "videoUrl", "video_url", "url", "mp4Url", "outputUrl");
+        const tUrl = getStr(clip, "thumbnailUrl", "thumbnail_url", "thumbnail");
+        const cId  = getStr(clip, "clipId", "clip_id", "id");
+        const title = typeof clip.title === "string" ? clip.title : `Clip ${idx + 1}`;
+        const dur   = typeof clip.duration === "number" ? clip.duration : 0;
+        const start = typeof clip.start === "number" ? clip.start : 0;
+        const end   = typeof clip.end === "number" ? clip.end : 0;
+        if (!vUrl) return Promise.reject(new Error(`No videoUrl for clip ${idx}`));
+        return db.repurposedClip.create({
           data: {
-            videoId,
-            title: clip.title ?? `Clip ${idx + 1}`,
-            storagePath: clip.videoUrl,
-            thumbnailUrl: clip.thumbnailUrl ?? null,
-            duration: Math.round(clip.duration),
-            startTime: clip.start,
-            endTime: clip.end,
-            opusClipId: clip.clipId,
+            videoId: videoId!,
+            title,
+            storagePath: vUrl,
+            thumbnailUrl: tUrl ?? null,
+            duration: Math.round(dur),
+            startTime: start,
+            endTime: end,
+            opusClipId: cId ?? null,
             status: "READY",
             hashtags: [],
           },
-        })
-      )
+        });
+      })
     );
 
     const succeeded = results.filter((r) => r.status === "fulfilled").length;
