@@ -168,7 +168,10 @@ async function submitShotstackTrim(
   durationSec: number,
   callbackUrl: string
 ): Promise<string> {
-  const res = await fetch("https://api.shotstack.io/v1/render", {
+  const shotstackBase = process.env.SHOTSTACK_ENV === "production"
+    ? "https://api.shotstack.io/v1"
+    : "https://api.shotstack.io/stage";
+  const res = await fetch(`${shotstackBase}/render`, {
     method: "POST",
     headers: {
       "x-api-key": process.env.SHOTSTACK_API_KEY!,
