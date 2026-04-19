@@ -1,4 +1,4 @@
-import { db } from "@contentforge/db";
+﻿import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
@@ -26,20 +26,49 @@ interface AssemblyAITranscript {
   error?: string;
 }
 
-interface SelectedSegment {
-  type: "hook" | "value";
-  start: number; // seconds
-  end: number;   // seconds
+interface FrameworkDef {
+  id: string;
+  platform: "TIKTOK" | "INSTAGRAM" | "YOUTUBE";
+  name: string;
+  minSec: number;
+  maxSec: number;
+}
+
+const FRAMEWORKS: FrameworkDef[] = [
+  { id: "pattern_interrupt", platform: "TIKTOK",    name: "Pattern Interrupt → Curiosity → Payoff",    minSec: 8,  maxSec: 18 },
+  { id: "hot_take",          platform: "TIKTOK",    name: "Hot Take / Controversial POV",               minSec: 7,  maxSec: 15 },
+  { id: "relatable_hook",    platform: "INSTAGRAM", name: "Relatable Hook → Micro Value → Loop",        minSec: 7,  maxSec: 12 },
+  { id: "before_after",      platform: "INSTAGRAM", name: "Mini Transformation / Before-After",         minSec: 10, maxSec: 20 },
+  { id: "open_loop",         platform: "YOUTUBE",   name: "Open Loop → Deliver → Close Loop",           minSec: 12, maxSec: 25 },
+  { id: "list_format",       platform: "YOUTUBE",   name: "List Format / Fast Value Stacking",          minSec: 15, maxSec: 30 },
+];
+
+interface FoundClip {
+  framework: string;
+  platform: string;
+  start: number;
+  end: number;
   title: string;
   hook: string;
   score: number;
 }
 
-async function selectViralMoments(
+interface MissingFramework {
+  framework: string;
+  platform: string;
+  reason: string;
+  suggestedScript: string;
+}
+
+interface ViralMomentsResult {
+  clips: FoundClip[];
+  missing: MissingFramework[];
+}
+
+async function analyzeViralFrameworks(
   transcriptText: string,
   words: AssemblyAIWord[]
-): Promise<SelectedSegment[]> {
-  // Build timed transcript: one line per ~8 words with start timestamp
+): Promise<ViralMomentsResult> {
   const lines: string[] = [];
   for (let i = 0; i < words.length; i += 8) {
     const chunk = words.slice(i, i + 8);
@@ -47,48 +76,67 @@ async function selectViralMoments(
     lines.push(`[${startSec}s] ${chunk.map((w) => w.text).join(" ")}`);
   }
 
-  const systemPrompt = `You are a viral short-form video strategist specializing in TikTok/Reels algorithm optimization in 2026.
+  const systemPrompt = `You are a viral short-form video strategist specializing in TikTok, Instagram Reels, and YouTube Shorts in 2026.
 
-The algorithm rewards: completion rate (most important) → replays/loops → shares + saves.
+The algorithm rewards (in order): completion rate → replays/loops → saves/shares.
 
-Given a transcript with timestamps, find the best MICRO-MOMENTS for viral short clips.
+Analyze this transcript and try to find moments matching 6 specific viral frameworks. ONLY include a clip if it scores 70 or higher. It is far better to return 2 elite clips than 6 mediocre ones — do NOT force a clip if the content doesn't clearly support the framework.
 
-## Format 1: VIRAL HOOKS (6–10 seconds each) — find 3
-Single punchy statements that STOP THE SCROLL. Target 8 seconds.
-Algorithm: 6-10s clips get 120-200% watch rate because they loop automatically.
-Look for:
-- Contrarian takes: "Stop doing X if you want Y"
-- Strong claims: "Most people don't realize this..."
-- Curiosity gaps: "This is exactly why you're failing at..."
-- Pattern interrupts: surprising, counterintuitive, bold
-- LOOP TRIGGER: last line flows naturally back to first line
+## FRAMEWORKS TO FIND:
 
-## Format 2: VALUE CLIPS (12–20 seconds each) — find 3
-Quick setup + payoff. Builds authority, drives saves. Target 15 seconds.
-Look for:
-- Problem + solution delivered in one breath
-- Specific actionable tip with a stated result
-- Counterintuitive insight + brief explanation
-- Ends with a memorable, quotable, saveable line
+1. **pattern_interrupt** (TikTok) — 8-18 seconds
+   Structure: Scroll-stopping statement (0-2s) → Build curiosity (2-6s) → Fast payoff (6-12s)
+   Look for: bold claim or "This is why X..." → brief tension → punchy insight
+   Loop trigger: ending flows naturally back to opening
 
-CRITICAL RULES:
-- start/end MUST land on COMPLETE sentence boundaries (never cut mid-sentence)
-- Hooks: 6–10 seconds ONLY
-- Value clips: 12–20 seconds ONLY
-- Every clip must make 100% sense with ZERO context from the full video
-- Hook clips must feel loopable — viewer watches it twice without realizing
+2. **hot_take** (TikTok) — 7-15 seconds
+   Structure: Strong controversial opinion → Quick justification → Reinforcement
+   Look for: "Stop doing X", polarizing statement, counterintuitive take + brief reasoning
 
-Return ONLY valid JSON array, no markdown:
-[
-  {
-    "type": "hook",
-    "start": <seconds_float>,
-    "end": <seconds_float>,
-    "title": "<punchy 4-6 word title>",
-    "hook": "<exact opening line>",
-    "score": <0-100>
-  }
-]`;
+3. **relatable_hook** (Instagram) — 7-12 seconds
+   Structure: Relatable pain (0-2s) → Quick micro-value (2-8s) → End loops to start
+   Look for: "If you're struggling with X..." → micro-solution → ending that connects back to hook
+
+4. **before_after** (Instagram) — 10-20 seconds
+   Structure: Before (specific problem/number) → After (result) → How (one key insight)
+   Look for: Transformation story, before/after comparison, result + single key reason
+
+5. **open_loop** (YouTube) — 12-25 seconds
+   Structure: Tease outcome (0-2s) → Deliver steps clearly → Close the loop explicitly
+   Look for: "Here's exactly how I did X" → numbered or sequential explanation → clear conclusion
+
+6. **list_format** (YouTube) — 15-30 seconds
+   Structure: Hook ("X ways to...") → Rapid-fire numbered points → Clean memorable ending
+   Look for: Any content with 2+ distinct tips/points that can be delivered quickly
+
+## RULES:
+- start and end times MUST land on COMPLETE sentence boundaries (never cut mid-sentence)
+- Every clip must make 100% sense with ZERO context from the rest of the video
+- For MISSING frameworks: write a personalized script using the speaker's actual topic, niche, vocabulary, and tone from the transcript — make it feel native to their voice, not generic
+- Suggested scripts should be the exact words the user can read on camera
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "clips": [
+    {
+      "framework": "pattern_interrupt",
+      "platform": "tiktok",
+      "start": 12.4,
+      "end": 24.1,
+      "title": "Why most businesses fail",
+      "hook": "This is why 99% of businesses fail on TikTok",
+      "score": 87
+    }
+  ],
+  "missing": [
+    {
+      "framework": "hot_take",
+      "platform": "tiktok",
+      "reason": "No strong controversial opinions or polarizing statements found in this content",
+      "suggestedScript": "Stop [doing X specific to their topic] if you want [result]. Everyone tells you to [common advice]. That's exactly wrong. [Their specific insight]. That's the real game."
+    }
+  ]
+}`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -99,21 +147,19 @@ Return ONLY valid JSON array, no markdown:
     ],
   });
 
-  const raw = response.choices[0]?.message?.content?.trim() ?? "[]";
+  const raw = response.choices[0]?.message?.content?.trim() ?? '{"clips":[],"missing":[]}';
   const cleaned = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-  const moments = JSON.parse(cleaned) as SelectedSegment[];
+  const result = JSON.parse(cleaned) as ViralMomentsResult;
 
-  const hooks = moments
-    .filter((m) => m.type === "hook" && m.end - m.start >= 5 && m.end - m.start <= 12)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
+  // Validate found clips against framework duration bounds
+  result.clips = result.clips.filter((clip) => {
+    const fw = FRAMEWORKS.find((f) => f.id === clip.framework);
+    if (!fw) return false;
+    const dur = clip.end - clip.start;
+    return clip.score >= 70 && dur >= fw.minSec * 0.8 && dur <= fw.maxSec * 1.2;
+  });
 
-  const valueClips = moments
-    .filter((m) => m.type === "value" && m.end - m.start >= 10 && m.end - m.start <= 22)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-
-  return [...hooks, ...valueClips];
+  return result;
 }
 
 async function submitShotstackTrim(
@@ -187,14 +233,14 @@ export async function POST(req: Request) {
   const video = await db.uploadedVideo.findUnique({ where: { id: videoId } });
   if (!video) return NextResponse.json({ error: "Video not found" }, { status: 404 });
 
-  // Idempotency: skip if clips are already being processed
+  // Idempotency: skip if clips already created
   const existingClips = await db.repurposedClip.count({ where: { videoId } });
   if (existingClips > 0) {
     console.log(`[assemblyai] video=${videoId} already has ${existingClips} clips, skipping`);
     return NextResponse.json({ ok: true });
   }
 
-  // Fetch full transcript with word-level timestamps from AssemblyAI
+  // Fetch full transcript with word-level timestamps
   const apiKey = process.env.ASSEMBLYAI_API_KEY!;
   const transcriptRes = await fetch(
     `https://api.assemblyai.com/v2/transcript/${payload.transcript_id}`,
@@ -220,21 +266,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // GPT selects 3 viral hooks (6-10s) + 3 value clips (12-20s)
-  let segments: SelectedSegment[];
+  // GPT analyzes for 6 viral frameworks
+  let result: ViralMomentsResult;
   try {
-    segments = await selectViralMoments(transcript.text, transcript.words);
+    result = await analyzeViralFrameworks(transcript.text, transcript.words);
     console.log(
-      `[assemblyai] GPT selected ${segments.length} micro-moments for video=${videoId}: ${segments.filter(s => s.type === 'hook').length} hooks, ${segments.filter(s => s.type === 'value').length} value clips`
+      `[assemblyai] video=${videoId}: ${result.clips.length} clips found, ${result.missing.length} frameworks need scripts`,
+      result.clips.map((c) => `${c.framework}(${c.start}s-${c.end}s score=${c.score})`)
     );
   } catch (err) {
-    console.error(`[assemblyai] GPT segment selection failed for video=${videoId}:`, err);
-    await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
-    return NextResponse.json({ ok: true });
-  }
-
-  if (!segments.length) {
-    console.warn(`[assemblyai] no viable segments found for video=${videoId}`);
+    console.error(`[assemblyai] GPT framework analysis failed for video=${videoId}:`, err);
     await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
     return NextResponse.json({ ok: true });
   }
@@ -243,50 +284,86 @@ export async function POST(req: Request) {
     process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
 
   let submitted = 0;
-  for (const seg of segments) {
-    const durationSec = Math.round(seg.end - seg.start);
+
+  // Create PROCESSING clips and submit Shotstack trim renders
+  for (const found of result.clips) {
+    const fw = FRAMEWORKS.find((f) => f.id === found.framework);
+    if (!fw) continue;
+    const durationSec = Math.round(found.end - found.start);
+
     try {
-      // Create PROCESSING clip record — Shotstack render ID stored later
       const clip = await db.repurposedClip.create({
         data: {
           videoId,
-          title: seg.title,
+          title: found.title,
           duration: durationSec,
-          startTime: Math.round(seg.start),
-          endTime: Math.round(seg.end),
+          startTime: found.start,
+          endTime: found.end,
           status: "PROCESSING",
-          hashtags: [seg.type], // "hook" or "value" — used for UI badge
+          platform: fw.platform,
+          format: found.framework,
+          hashtags: [],
         },
       });
 
-      // Submit Shotstack trim-only render (no composition, just cuts at timestamps)
       const renderId = await submitShotstackTrim(
         video.storagePath,
-        seg.start,
+        found.start,
         durationSec,
         `${appUrl}/api/webhooks/shotstack?clipId=${clip.id}`
       );
 
-      // Store Shotstack render ID so the callback can find this clip
       await db.repurposedClip.update({
         where: { id: clip.id },
         data: { opusClipId: renderId },
       });
 
       console.log(
-        `[assemblyai] clip=${clip.id} "${seg.title}" (score=${seg.score}) → Shotstack renderId=${renderId}`
+        `[assemblyai] clip=${clip.id} framework=${found.framework} platform=${fw.platform} score=${found.score} → Shotstack renderId=${renderId}`
       );
       submitted++;
     } catch (err) {
       console.error(
-        `[assemblyai] failed to submit segment "${seg.title}" for video=${videoId}:`,
-        err
+        `[assemblyai] failed to submit ${found.framework} clip for video=${videoId}:`, err
+      );
+    }
+  }
+
+  // Create SCRIPT_NEEDED clips with personalized scripts for missing frameworks
+  for (const missing of result.missing) {
+    const fw = FRAMEWORKS.find((f) => f.id === missing.framework);
+    if (!fw) continue;
+
+    try {
+      await db.repurposedClip.create({
+        data: {
+          videoId,
+          title: fw.name,
+          status: "SCRIPT_NEEDED",
+          platform: fw.platform,
+          format: missing.framework,
+          reelScript: {
+            suggestedScript: missing.suggestedScript,
+            reason: missing.reason,
+            frameworkName: fw.name,
+            targetLength: `${fw.minSec}-${fw.maxSec}s`,
+          },
+          hashtags: [],
+        },
+      });
+
+      console.log(
+        `[assemblyai] SCRIPT_NEEDED framework=${missing.framework} platform=${fw.platform} reason="${missing.reason}"`
+      );
+    } catch (err) {
+      console.error(
+        `[assemblyai] failed to create script-needed record for ${missing.framework}:`, err
       );
     }
   }
 
   console.log(
-    `[assemblyai] video=${videoId}: ${submitted}/${segments.length} Shotstack trim renders submitted`
+    `[assemblyai] video=${videoId}: ${submitted} Shotstack renders submitted, ${result.missing.length} script suggestions created`
   );
-  return NextResponse.json({ ok: true, submitted });
+  return NextResponse.json({ ok: true, submitted, scriptNeeded: result.missing.length });
 }
