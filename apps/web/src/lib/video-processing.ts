@@ -7,9 +7,11 @@ import { unlink } from "fs/promises";
 import { pipeline } from "stream/promises";
 import * as path from "path";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 let ffmpegBin: string | null = null;
-try { ffmpegBin = require("ffmpeg-static"); } catch {}
+try {
+  // eslint-disable-next-line no-eval
+  ffmpegBin = eval('require')('ffmpeg-static') as string;
+} catch {}
 
 const execFileAsync = promisify(execFile);
 
