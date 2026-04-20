@@ -1,5 +1,17 @@
 import OpenAI from "openai";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { createReadStream, createWriteStream } from "fs";
+import { unlink } from "fs/promises";
+import { pipeline } from "stream/promises";
+import * as path from "path";
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+let ffmpegBin: string | null = null;
+try { ffmpegBin = require("ffmpeg-static"); } catch {}
+
+const execFileAsync = promisify(execFile);
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -261,6 +273,63 @@ export async function generateAndUploadVoiceover(
 
   console.log(`[voiceover] ✅ Uploaded: ${url} (${wordTimings.length} words timed)`);
   return { url, wordTimings };
+}
+
+// ─── Face-video trimmer ───────────────────────────────────────────────────────
+
+/**
+ * Downloads the source video, trims it to `durationSec` seconds using ffmpeg,
+ * uploads the trimmed clip to R2 `face-clips/{clipId}.mp4`, and returns its
+ * public URL. Falls back to `sourceVideoUrl` when ffmpeg is unavailable.
+ */
+export async function trimAndUploadFaceVideo(
+  sourceVideoUrl: string,
+  clipId: string,
+  durationSec: number,
+): Promise<string> {
+  if (!ffmpegBin) {
+    console.warn("[video-trim] ffmpeg-static unavailable — using full source video");
+    return sourceVideoUrl;
+  }
+
+  const trimSec = Math.ceil(durationSec) + 2; // slight buffer
+  const tmpDir = "/tmp";
+  const inputPath = path.join(tmpDir, `${clipId}-input.mp4`);
+  const outputPath = path.join(tmpDir, `${clipId}-trimmed.mp4`);
+
+  try {
+    // Download source video to /tmp
+    const res = await fetch(sourceVideoUrl);
+    if (!res.ok || !res.body) throw new Error(`Failed to fetch source video: ${res.status}`);
+    await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(inputPath));
+
+    // Trim with ffmpeg (-c copy = no re-encode, fast)
+    await execFileAsync(ffmpegBin!, [
+      "-i", inputPath,
+      "-t", String(trimSec),
+      "-c", "copy",
+      "-avoid_negative_ts", "make_zero",
+      "-y", outputPath,
+    ]);
+
+    // Upload trimmed video to R2
+    const key = `face-clips/${clipId}.mp4`;
+    await r2.send(new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: createReadStream(outputPath),
+      ContentType: "video/mp4",
+    }));
+
+    const url = `${process.env.R2_PUBLIC_URL}/${key}`;
+    console.log(`[video-trim] ✅ Trimmed to ${trimSec}s → ${url}`);
+    return url;
+  } catch (err) {
+    console.error("[video-trim] ⚠️ Trim failed — falling back to source", err);
+    return sourceVideoUrl;
+  } finally {
+    await Promise.allSettled([unlink(inputPath), unlink(outputPath)]);
+  }
 }
 
 // ─── Pexels B-roll ────────────────────────────────────────────────────────────

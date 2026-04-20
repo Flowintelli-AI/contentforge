@@ -3,7 +3,7 @@
 
 import { db } from "@contentforge/db";
 import { heyGenService } from "./service";
-import { generateAndUploadVoiceover } from "@/lib/video-processing";
+import { generateAndUploadVoiceover, trimAndUploadFaceVideo } from "@/lib/video-processing";
 import { createLogger } from "../shared/logger";
 
 const logger = createLogger("heygen-processor");
@@ -68,17 +68,28 @@ export async function processAiClip(clipId: string): Promise<void> {
 
   try {
     // 1. Generate TTS audio and upload to R2
-    const { url: audioUrl } = await generateAndUploadVoiceover(
+    const { url: audioUrl, wordTimings } = await generateAndUploadVoiceover(
       script,
       voiceId,
       `ai-clip-${clipId}`,
     );
     logger.info("Voiceover ready", { clipId, audioUrl });
 
-    // 2. Submit to HeyGen lipsync
+    // 2. Trim source video to match TTS duration (saves HeyGen credits)
+    const audioDuration = wordTimings.length > 0
+      ? wordTimings[wordTimings.length - 1].end
+      : 30; // fallback 30s if no timings
+    const faceVideoUrl = await trimAndUploadFaceVideo(
+      video.storagePath,
+      clipId,
+      audioDuration,
+    );
+    logger.info("Face video ready", { clipId, faceVideoUrl, audioDuration });
+
+    // 3. Submit to HeyGen lipsync
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
     const { lipsyncId } = await heyGenService.submitLipsync({
-      faceVideoUrl: video.storagePath,
+      faceVideoUrl,
       audioUrl,
       title: clip.title ?? undefined,
       callbackUrl: appUrl ? `${appUrl}/api/webhooks/heygen` : undefined,
