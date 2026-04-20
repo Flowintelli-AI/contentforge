@@ -449,10 +449,13 @@ export async function POST(req: Request) {
     }
   }
 
-  // Trigger the Type 2 pipeline for each AI clip (TTS → HeyGen lipsync)
-  for (const id of aiClipIds) {
-    waitUntil(processAiClip(id));
-  }
+  // Trigger the Type 2 pipeline sequentially to stay within ElevenLabs concurrency limit
+  waitUntil(
+    aiClipIds.reduce(
+      (chain: Promise<void>, id: string) => chain.then(() => processAiClip(id)),
+      Promise.resolve()
+    )
+  );
 
   console.log(
     `[assemblyai] video=${videoId}: ${submitted} Shotstack renders submitted, ${aiQueued} AI fill clips queued`
