@@ -29,7 +29,7 @@ interface UploadUrlResponse {
 }
 
 interface CreateCaptionsResponse {
-  projectId: string;
+  id: string;
 }
 
 class ReapService {
@@ -59,23 +59,27 @@ class ReapService {
     }, { shouldRetry: isRetryableHttpError });
   }
 
-  // Step 2 — stream the source video directly to Reap's S3 presigned URL
+  // Step 2 — download video to buffer then PUT to Reap's S3 presigned URL.
+  // S3 presigned URLs require Content-Length — chunked/streaming is not supported.
   private async uploadVideo(presignedUrl: string, videoUrl: string): Promise<void> {
     const sourceRes = await fetch(videoUrl);
     if (!sourceRes.ok || !sourceRes.body) {
       throw new Error(`Failed to fetch source video: ${sourceRes.status}`);
     }
 
+    const buffer = Buffer.from(await sourceRes.arrayBuffer());
+
     const uploadRes = await fetch(presignedUrl, {
       method: "PUT",
-      // Stream directly — avoids buffering the whole file in memory
-      body: sourceRes.body,
-      headers: { "Content-Type": "video/mp4" },
-      // @ts-expect-error — duplex required for streaming in Node.js fetch
-      duplex: "half",
+      body: buffer,
+      headers: {
+        "Content-Type": "video/mp4",
+        "Content-Length": String(buffer.byteLength),
+      },
     });
     if (!uploadRes.ok) {
-      throw new Error(`Reap presigned upload failed: ${uploadRes.status}`);
+      const body = await uploadRes.text();
+      throw new Error(`Reap presigned upload failed: ${uploadRes.status} ${body}`);
     }
   }
 
@@ -120,7 +124,7 @@ class ReapService {
     await this.uploadVideo(presignedUrl, videoUrl);
     logger.info("Video uploaded to Reap", { uploadId });
 
-    const { projectId } = await this.createCaptions(uploadId, options);
+    const { id: projectId } = await this.createCaptions(uploadId, options);
     logger.info("Reap captions project created", { projectId });
 
     return projectId;
