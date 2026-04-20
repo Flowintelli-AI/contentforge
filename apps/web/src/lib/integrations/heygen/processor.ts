@@ -3,7 +3,7 @@
 
 import { db } from "@contentforge/db";
 import { generateAndUploadVoiceover, trimVideoWithShotstack } from "@/lib/video-processing";
-import { pickMusicTrack } from "@/lib/music-catalog";
+import { fetchMoodTrack } from "@/lib/integrations/pixabay/music";
 import { createLogger } from "../shared/logger";
 
 const logger = createLogger("heygen-processor");
@@ -91,13 +91,16 @@ export async function processAiClip(clipId: string): Promise<void> {
     const encodedAudioUrl = encodeURIComponent(audioUrl);
     const shotstackCallback = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}&purpose=heygen&audioUrl=${encodedAudioUrl}`;
 
+    // Fetch a mood-matched royalty-free track from Pixabay (null = no music)
+    const musicUrl = await fetchMoodTrack(reelScript?.mood);
+
     const renderId = await trimVideoWithShotstack(
       video.storagePath,
       trimDuration,
       shotstackCallback,
-      pickMusicTrack(reelScript?.mood),
+      musicUrl ?? undefined,
     );
-    logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration, mood: reelScript?.mood ?? "motivational" });
+    logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration, mood: reelScript?.mood ?? "motivational", musicUrl });
 
     // 4. Mark as PROCESSING — Shotstack webhook fires when trim is done,
     //    then submits to HeyGen, then HeyGen webhook fires → Reap → READY
