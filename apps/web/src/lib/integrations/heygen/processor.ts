@@ -74,13 +74,12 @@ export async function processAiClip(clipId: string): Promise<void> {
     );
     logger.info("Voiceover ready", { clipId, audioUrl });
 
-    // 2. Determine clip duration.
-    // HeyGen rejects if |video - audio| / video > 15%.
-    // Rounding up to the nearest second gives at most ~5% difference — safe.
+    // 2. Trim video to exact audio duration so they end at the same time.
+    // Shotstack accepts decimal seconds. HeyGen requires <15% duration diff — 0% is ideal.
     const audioDuration = wordTimings.length > 0
       ? wordTimings[wordTimings.length - 1].end
       : 30;
-    const trimDuration = Math.ceil(audioDuration);
+    const trimDuration = audioDuration;
 
     // 3. Use Shotstack to trim the source video to just the clip length.
     //    Shotstack renders a short public-URL clip which we then send to HeyGen.
