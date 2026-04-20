@@ -84,7 +84,7 @@ export async function POST(req: Request) {
 
   try {
     const projectId = await reapService.submitCaptions(body.url, {
-      captionsPreset: "system_beasty",
+      captionsPreset: "karaoke-bold",
       enableEmojis: true,
       enableHighlights: true,
       language: "en",

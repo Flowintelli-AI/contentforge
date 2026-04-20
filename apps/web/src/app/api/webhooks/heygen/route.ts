@@ -84,7 +84,7 @@ export async function POST(req: Request) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
       try {
         const projectId = await reapService.submitCaptions(videoUrl, {
-          captionsPreset: "system_beasty",
+          captionsPreset: "karaoke-bold",
           enableEmojis: true,
           enableHighlights: true,
           language: "en",
@@ -100,7 +100,11 @@ export async function POST(req: Request) {
 
         logger.info("Submitted lipsync clip to Reap", { clipId: lipsyncClip.id, projectId });
       } catch (err) {
-        logger.error("Reap submission failed for lipsync clip", { clipId: lipsyncClip.id, err });
+        logger.error("Reap submission failed for lipsync clip", {
+          clipId: lipsyncClip.id,
+          error: err instanceof Error ? err.message : String(err),
+          status: (err as any)?.status,
+        });
         await db.repurposedClip.update({
           where: { id: lipsyncClip.id },
           data: { status: "FAILED" },

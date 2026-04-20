@@ -14,7 +14,7 @@ const logger = createLogger("reap");
 const REAP_BASE = "https://public.reap.video/api/v1/automation";
 
 export interface ReapCaptionsOptions {
-  captionsPreset?: string;   // e.g. "system_beasty" (MrBeast-style)
+  captionsPreset?: string;   // e.g. "karaoke-bold", "minimal-white" — see Reap dashboard for full list
   enableEmojis?: boolean;
   enableHighlights?: boolean;
   language?: string;         // ISO 639-1, default "en"
@@ -89,7 +89,7 @@ class ReapService {
         headers: this.headers,
         body: JSON.stringify({
           uploadId,
-          captionsPreset: options.captionsPreset ?? "system_beasty",
+          captionsPreset: options.captionsPreset ?? "karaoke-bold",
           enableEmojis: options.enableEmojis ?? true,
           enableHighlights: options.enableHighlights ?? true,
           language: options.language ?? "en",
