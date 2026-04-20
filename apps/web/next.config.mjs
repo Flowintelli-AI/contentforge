@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Prevent webpack from bundling native binaries — resolved at runtime from node_modules
+  serverExternalPackages: ["ffmpeg-static"],
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**.blob.core.windows.net" },
