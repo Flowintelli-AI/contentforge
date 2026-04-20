@@ -1,5 +1,6 @@
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
+import { reapService } from "@/lib/integrations/reap/service";
 
 interface ShotstackCallback {
   id: string;
@@ -41,47 +42,27 @@ export async function POST(req: Request) {
 
   console.log(`[shotstack] trim done clip=${clip.id} url=${body.url}`);
 
-  // Trimmed clip ready → submit to Submagic for viral treatment (captions, music, template)
+  // Trimmed clip ready → submit to Reap.video for viral captions
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
 
   try {
-    const submagicRes = await fetch("https://api.submagic.co/v1/projects", {
-      method: "POST",
-      headers: {
-        "x-api-key": process.env.SUBMAGIC_API_KEY!,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title: clip.title ?? "ContentForge Clip",
-        language: "en",
-        videoUrl: body.url,
-        webhookUrl: `${appUrl}/api/webhooks/submagic?clipId=${clip.id}`,
-        templateName: "Hormozi 2",
-        hookTitle: true,
-      }),
+    const projectId = await reapService.submitCaptions(body.url, {
+      captionsPreset: "system_beasty",
+      enableEmojis: true,
+      enableHighlights: true,
+      language: "en",
+      webhookUrl: `${appUrl}/api/webhooks/reap?clipId=${clip.id}`,
     });
 
-    if (!submagicRes.ok) {
-      const errText = await submagicRes.text();
-      console.error(`[shotstack] Submagic submission failed clip=${clip.id}:`, errText);
-      await db.repurposedClip.update({ where: { id: clip.id }, data: { status: "FAILED" } });
-    } else {
-      const submagicData = await submagicRes.json() as Record<string, unknown>;
-      console.log(`[shotstack] Submagic raw response:`, JSON.stringify(submagicData));
-      // Submagic may return projectId, id, or project_id depending on API version
-      const projectId = (submagicData.projectId ?? submagicData.id ?? submagicData.project_id) as string | undefined;
-      // Store Submagic projectId in opusClipId (repurposing legacy field as tracking ref)
-      await db.repurposedClip.update({
-        where: { id: clip.id },
-        data: { opusClipId: projectId ? `submagic:${projectId}` : `submagic:unknown` },
-      });
-      console.log(
-        `[shotstack] clip=${clip.id} → Submagic projectId=${projectId}`
-      );
-    }
+    // Store Reap projectId so the webhook can correlate if webhookUrl isn't supported
+    await db.repurposedClip.update({
+      where: { id: clip.id },
+      data: { opusClipId: `reap:${projectId}` },
+    });
+    console.log(`[shotstack] clip=${clip.id} → Reap projectId=${projectId}`);
   } catch (err) {
-    console.error(`[shotstack] Submagic submission error clip=${clip.id}:`, err);
+    console.error(`[shotstack] Reap submission error clip=${clip.id}:`, err);
     await db.repurposedClip.update({ where: { id: clip.id }, data: { status: "FAILED" } });
   }
 

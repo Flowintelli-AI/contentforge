@@ -8,6 +8,9 @@ import type {
   GenerateAvatarVideoParams,
   GenerateAvatarVideoResult,
   AvatarVideoStatus,
+  LipsyncParams,
+  LipsyncResult,
+  LipsyncStatus,
 } from "./interface";
 
 const logger = createLogger("heygen");
@@ -44,6 +47,16 @@ class MockHeyGenService implements IHeyGenService {
 
   async getVideoStatus(heygenVideoId: string): Promise<AvatarVideoStatus> {
     return this.videos.get(heygenVideoId) ?? { heygenVideoId, status: "pending" };
+  }
+
+  async submitLipsync(params: LipsyncParams): Promise<LipsyncResult> {
+    logger.info("MOCK submitLipsync", { faceVideoUrl: params.faceVideoUrl });
+    const id = `mock_lipsync_${Date.now()}`;
+    return { lipsyncId: id, status: "processing" };
+  }
+
+  async getLipsyncStatus(lipsyncId: string): Promise<LipsyncStatus> {
+    return { lipsyncId, status: "completed", downloadUrl: "https://example.com/mock-lipsync.mp4" };
   }
 }
 
@@ -129,6 +142,43 @@ class LiveHeyGenService implements IHeyGenService {
         downloadUrl: d.video_url,
         thumbnailUrl: d.thumbnail_url,
         duration: d.duration,
+        errorMessage: d.error,
+      };
+    }, { shouldRetry: isRetryableHttpError });
+  }
+
+  async submitLipsync(params: LipsyncParams): Promise<LipsyncResult> {
+    return withRetry(async () => {
+      const data = await this.request<{ data: { video_id: string } }>("/v2/video.lipsync", {
+        method: "POST",
+        body: JSON.stringify({
+          video_url: params.faceVideoUrl,
+          audio_url: params.audioUrl,
+          ...(params.title ? { title: params.title } : {}),
+          ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
+        }),
+      });
+      logger.info("HeyGen lipsync job created", { lipsyncId: data.data.video_id });
+      return { lipsyncId: data.data.video_id, status: "processing" };
+    }, { shouldRetry: isRetryableHttpError });
+  }
+
+  async getLipsyncStatus(lipsyncId: string): Promise<LipsyncStatus> {
+    return withRetry(async () => {
+      const data = await this.request<{
+        data: {
+          video_id: string;
+          status: string;
+          video_url?: string;
+          error?: string;
+        };
+      }>(`/v1/video_status.get?video_id=${lipsyncId}`);
+
+      const d = data.data;
+      return {
+        lipsyncId: d.video_id,
+        status: d.status as LipsyncStatus["status"],
+        downloadUrl: d.video_url,
         errorMessage: d.error,
       };
     }, { shouldRetry: isRetryableHttpError });
