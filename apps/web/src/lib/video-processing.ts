@@ -844,3 +844,66 @@ export async function submitShotstackRender(
   console.log(`[shotstack] ✅ Render queued: ${data.response.id}`);
   return data.response.id;
 }
+
+/**
+ * Submits a minimal Shotstack render that trims the source video to `durationSec`.
+ * Used as a pre-processing step before HeyGen lipsync — Shotstack renders the
+ * short clip to a public URL, then we pass that URL to HeyGen instead of the
+ * full multi-minute source video (which would be rejected for insufficient credits).
+ *
+ * Returns the Shotstack render ID. The webhook fires when the trimmed clip is ready.
+ */
+export async function trimVideoWithShotstack(
+  videoUrl: string,
+  durationSec: number,
+  webhookUrl: string,
+): Promise<string> {
+  const apiKey = process.env.SHOTSTACK_API_KEY;
+  if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
+
+  const env = process.env.SHOTSTACK_ENV ?? "stage";
+
+  const edit = {
+    timeline: {
+      tracks: [
+        {
+          clips: [
+            {
+              asset: { type: "video", src: videoUrl, trim: 0, volume: 1.0 },
+              start: 0,
+              length: durationSec,
+              fit: "cover",
+            },
+          ],
+        },
+      ],
+    },
+    output: {
+      format: "mp4",
+      size: { width: 1080, height: 1920 },
+      fps: 30,
+      quality: "medium",
+    },
+    callback: webhookUrl,
+  };
+
+  console.log(`[shotstack] Submitting trim render: ${durationSec}s`);
+
+  const res = await fetch(`https://api.shotstack.io/${env}/render`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify(edit),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Shotstack trim render error ${res.status}: ${errText}`);
+  }
+
+  const data = (await res.json()) as { response: { id: string } };
+  console.log(`[shotstack] ✅ Trim render queued: ${data.response.id}`);
+  return data.response.id;
+}

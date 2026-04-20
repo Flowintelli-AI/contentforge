@@ -2,8 +2,7 @@
 // Called via waitUntil after AssemblyAI webhook creates GENERATING_AI clips.
 
 import { db } from "@contentforge/db";
-import { heyGenService } from "./service";
-import { generateAndUploadVoiceover } from "@/lib/video-processing";
+import { generateAndUploadVoiceover, trimVideoWithShotstack } from "@/lib/video-processing";
 import { createLogger } from "../shared/logger";
 
 const logger = createLogger("heygen-processor");
@@ -75,40 +74,37 @@ export async function processAiClip(clipId: string): Promise<void> {
     );
     logger.info("Voiceover ready", { clipId, audioUrl });
 
-    // 2. Determine audio duration for partial lipsync bounds
+    // 2. Determine clip duration (audio length + 2s buffer)
     const audioDuration = wordTimings.length > 0
       ? wordTimings[wordTimings.length - 1].end
-      : 30; // fallback 30s if no timings
-    const endTime = Math.ceil(audioDuration) + 2; // slight buffer
+      : 30;
+    const trimDuration = Math.ceil(audioDuration) + 2;
 
-    // We send the full source video but use HeyGen's native start_time/end_time
-    // to request a partial lipsync. HeyGen only processes (and charges for) that
-    // slice — no ffmpeg pre-trimming needed.
-    const faceVideoUrl = video.storagePath;
-    logger.info("Face video ready", { clipId, faceVideoUrl, audioDuration, endTime });
+    // 3. Use Shotstack to trim the source video to just the clip length.
+    //    Shotstack renders a short public-URL clip which we then send to HeyGen.
+    //    This avoids sending the full multi-minute source video to HeyGen
+    //    (which exceeds the $5 API credit limit at $0.0333/s).
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
+    const encodedAudioUrl = encodeURIComponent(audioUrl);
+    const shotstackCallback = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}&purpose=heygen&audioUrl=${encodedAudioUrl}`;
 
-    // 3. Submit to HeyGen lipsync
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-    const { lipsyncId } = await heyGenService.submitLipsync({
-      faceVideoUrl,
-      audioUrl,
-      title: clip.title ?? undefined,
-      callbackUrl: appUrl ? `${appUrl}/api/webhooks/heygen` : undefined,
-      startTime: 0,
-      endTime,
-    });
+    const renderId = await trimVideoWithShotstack(
+      video.storagePath,
+      trimDuration,
+      shotstackCallback,
+    );
+    logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration });
 
-    // 3. Mark as PROCESSING and store lipsyncId so the webhook can correlate
+    // 4. Mark as PROCESSING — Shotstack webhook fires when trim is done,
+    //    then submits to HeyGen, then HeyGen webhook fires → Reap → READY
     await db.repurposedClip.update({
       where: { id: clipId },
       data: {
-        opusClipId: `heygen:${lipsyncId}`,
+        opusClipId: `shotstack-trim:${renderId}`,
         status: "PROCESSING",
         isAIGenerated: true,
       },
     });
-
-    logger.info("HeyGen lipsync submitted", { clipId, lipsyncId });
   } catch (err) {
     const errDetail = err instanceof Error
       ? { message: err.message, name: err.name, status: (err as any).status }
