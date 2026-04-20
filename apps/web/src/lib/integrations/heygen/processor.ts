@@ -96,7 +96,10 @@ export async function processAiClip(clipId: string): Promise<void> {
 
     logger.info("HeyGen lipsync submitted", { clipId, lipsyncId });
   } catch (err) {
-    logger.error("Failed to process AI clip", { clipId, err });
+    const errDetail = err instanceof Error
+      ? { message: err.message, name: err.name, status: (err as any).status }
+      : err;
+    logger.error("Failed to process AI clip", { clipId, err: errDetail });
     await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
   }
 }
