@@ -53,7 +53,12 @@ async function submitShotstackCompose(
         {
           clips: [
             {
-              asset: { type: "color", color: "#111111" },
+              asset: {
+                type: "html",
+                html: "<body style='background:#111111;margin:0;padding:0;display:block;width:1080px;height:1920px'></body>",
+                width: 1080,
+                height: 1920,
+              },
               start: 0,
               length: totalDuration,
             },
