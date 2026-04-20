@@ -88,37 +88,25 @@ export async function POST(
   }
 }
 
-// Runs in background via waitUntil — downloads first 20 MB of video and
-// submits to ElevenLabs IVC. Non-fatal: any failure is logged, webhook falls
-// back to ELEVENLABS_VOICE_ID env var or Rachel.
+// Runs in background via waitUntil — submits the R2 video URL directly to
+// ElevenLabs IVC using files_url. This avoids byte-range truncation which
+// corrupts the MP4 container (moov atom is at the end of phone recordings).
+// Non-fatal: any failure is logged, webhook falls back to ELEVENLABS_VOICE_ID.
 async function performVoiceClone(
   videoId: string,
   storagePath: string,
   elevenKey: string
 ) {
   try {
-    const SAMPLE_BYTES = 10 * 1024 * 1024; // 10 MB — ElevenLabs IVC limit is 11 MB
-
-    const headRes = await fetch(storagePath, { method: "HEAD" });
-    const totalBytes = parseInt(headRes.headers.get("content-length") ?? "0", 10);
-    const useRange = totalBytes > SAMPLE_BYTES;
-
-    const sampleRes = await fetch(storagePath, {
-      headers: useRange ? { Range: `bytes=0-${SAMPLE_BYTES - 1}` } : {},
-    });
-
-    const sampleBuffer = await sampleRes.arrayBuffer();
-    console.log(
-      `[clone-voice] Sample: ${(sampleBuffer.byteLength / 1024 / 1024).toFixed(1)} MB` +
-      ` of ${totalBytes ? (totalBytes / 1024 / 1024).toFixed(0) : "?"} MB (range=${useRange})`
-    );
+    console.log(`[clone-voice] Submitting R2 URL for video=${videoId}`);
 
     const form = new FormData();
     form.append("name", `Speaker-${videoId.slice(-8)}`);
     form.append("description", "Auto-cloned via ContentForge");
     form.append("remove_background_noise", "true");
-    // Always .mp4 — ElevenLabs rejects .mpeg4 and similar extensions
-    form.append("files", new Blob([sampleBuffer], { type: "video/mp4" }), "sample.mp4");
+    // Pass the public R2 URL directly — ElevenLabs fetches the complete file,
+    // avoiding the corrupted-container problem from byte-range slicing.
+    form.append("files_url", storagePath);
 
     const cloneRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
       method: "POST",
