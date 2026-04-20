@@ -1,6 +1,8 @@
 ﻿import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { waitUntil } from "@vercel/functions";
+import { processAiClip } from "@/lib/integrations/heygen/processor";
 
 export const maxDuration = 60;
 
@@ -406,6 +408,7 @@ export async function POST(req: Request) {
 
   // Create GENERATING_AI clips for missing frameworks — AI fill pipeline handles the rest
   let aiQueued = 0;
+  const aiClipIds: string[] = [];
   for (const missing of result.missing) {
     const fw = FRAMEWORKS.find((f) => f.id === missing.framework);
     if (!fw) continue;
@@ -414,7 +417,7 @@ export async function POST(req: Request) {
     const targetDuration = Math.round((fw.minSec + fw.maxSec) / 2);
 
     try {
-      await db.repurposedClip.create({
+      const aiClip = await db.repurposedClip.create({
         data: {
           videoId,
           title: fw.name,
@@ -434,8 +437,9 @@ export async function POST(req: Request) {
         },
       });
 
+      aiClipIds.push(aiClip.id);
       console.log(
-        `[assemblyai] GENERATING_AI framework=${missing.framework} platform=${fw.platform} targetDuration=${targetDuration}s`
+        `[assemblyai] GENERATING_AI framework=${missing.framework} platform=${fw.platform} targetDuration=${targetDuration}s clipId=${aiClip.id}`
       );
       aiQueued++;
     } catch (err) {
@@ -443,6 +447,11 @@ export async function POST(req: Request) {
         `[assemblyai] failed to create ai-fill record for ${missing.framework}:`, err
       );
     }
+  }
+
+  // Trigger the Type 2 pipeline for each AI clip (TTS → HeyGen lipsync)
+  for (const id of aiClipIds) {
+    waitUntil(processAiClip(id));
   }
 
   console.log(

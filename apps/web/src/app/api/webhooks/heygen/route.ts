@@ -1,15 +1,17 @@
 // ─── HeyGen webhook handler ───────────────────────────────────────────────────
-// HeyGen sends a POST when a video generation job completes or fails.
+// Handles both avatar video jobs (AiVideoJob) and lipsync jobs (RepurposedClip).
 // Configure callback URL in HeyGen account settings: <APP_URL>/api/webhooks/heygen
 
 import { NextResponse } from "next/server";
 import { db } from "@contentforge/db";
+import { reapService } from "@/lib/integrations/reap/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
 
 const logger = createLogger("heygen-webhook");
 
+// HeyGen sends slightly different shapes for avatar vs lipsync — keep broad
 interface HeyGenWebhookPayload {
-  event_type: "avatar_video.success" | "avatar_video.fail";
+  event_type: string;
   event_data: {
     video_id: string;
     url?: string;
@@ -37,34 +39,98 @@ export async function POST(req: Request) {
   }
 
   const { event_type, event_data } = payload;
-  logger.info("Received webhook", { event_type, videoId: event_data.video_id });
+  logger.info("Received webhook", { event_type, videoId: event_data.video_id, raw: JSON.stringify(payload) });
 
+  const isSuccess = event_type.includes("success") || event_type.includes("complete");
+  const isFailed = event_type.includes("fail") || event_type.includes("error");
+  const { video_id, url: videoUrl, error: errorMsg } = event_data;
+
+  // ── Lipsync clip (RepurposedClip.opusClipId = "heygen:<video_id>") ─────────
+  // Check this BEFORE the AiVideoJob lookup so lipsync clips take priority.
+  const lipsyncClip = await db.repurposedClip.findFirst({
+    where: { opusClipId: `heygen:${video_id}` },
+  });
+
+  if (lipsyncClip) {
+    if (isFailed) {
+      logger.error("Lipsync job failed", { clipId: lipsyncClip.id, error: errorMsg });
+      await db.repurposedClip.update({ where: { id: lipsyncClip.id }, data: { status: "FAILED" } });
+      return NextResponse.json({ received: true });
+    }
+
+    if (isSuccess) {
+      if (!videoUrl) {
+        // Log the raw payload — HeyGen may use a different field name for lipsync
+        logger.warn("Lipsync success but no URL in event_data — check raw payload above", {
+          clipId: lipsyncClip.id,
+        });
+        return NextResponse.json({ received: true });
+      }
+
+      logger.info("Lipsync complete, submitting to Reap captions", {
+        clipId: lipsyncClip.id,
+        videoUrl,
+      });
+
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+      try {
+        const projectId = await reapService.submitCaptions(videoUrl, {
+          captionsPreset: "system_beasty",
+          enableEmojis: true,
+          enableHighlights: true,
+          language: "en",
+          webhookUrl: appUrl
+            ? `${appUrl}/api/webhooks/reap?clipId=${lipsyncClip.id}`
+            : undefined,
+        });
+
+        await db.repurposedClip.update({
+          where: { id: lipsyncClip.id },
+          data: { opusClipId: `reap:${projectId}` },
+        });
+
+        logger.info("Submitted lipsync clip to Reap", { clipId: lipsyncClip.id, projectId });
+      } catch (err) {
+        logger.error("Reap submission failed for lipsync clip", { clipId: lipsyncClip.id, err });
+        await db.repurposedClip.update({
+          where: { id: lipsyncClip.id },
+          data: { status: "FAILED" },
+        });
+      }
+
+      return NextResponse.json({ received: true });
+    }
+
+    // Other event types (e.g. progress) — ack and continue
+    return NextResponse.json({ received: true });
+  }
+
+  // ── Avatar video job (legacy AiVideoJob) ────────────────────────────────────
   try {
-    // AiVideoJob tracks HeyGen generation jobs (heygenJobId maps to HeyGen's video_id)
-    if (event_type === "avatar_video.success") {
+    if (isSuccess) {
       await db.aiVideoJob.updateMany({
-        where: { heygenJobId: event_data.video_id },
+        where: { heygenJobId: video_id },
         data: {
           status: "completed",
-          outputUrl: event_data.url ?? null,
+          outputUrl: videoUrl ?? null,
           metadata: {
             thumbnailUrl: event_data.thumbnail_url ?? null,
             duration: event_data.duration ?? null,
           },
         },
       });
-      logger.info("Avatar video completed", { videoId: event_data.video_id });
+      logger.info("Avatar video completed", { videoId: video_id });
     }
 
-    if (event_type === "avatar_video.fail") {
+    if (isFailed) {
       await db.aiVideoJob.updateMany({
-        where: { heygenJobId: event_data.video_id },
+        where: { heygenJobId: video_id },
         data: {
           status: "failed",
-          errorMsg: event_data.error ?? "Unknown error",
+          errorMsg: errorMsg ?? "Unknown error",
         },
       });
-      logger.error("Avatar video failed", { videoId: event_data.video_id, error: event_data.error });
+      logger.error("Avatar video failed", { videoId: video_id, error: errorMsg });
     }
   } catch (err) {
     logger.error("DB update failed", { err });

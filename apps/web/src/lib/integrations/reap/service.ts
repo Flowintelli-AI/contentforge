@@ -50,6 +50,7 @@ class ReapService {
   private async getUploadUrl(): Promise<UploadUrlResponse> {
     return withRetry(async () => {
       const res = await fetch(`${REAP_BASE}/get-upload-url`, {
+        method: "POST",
         headers: this.headers,
       });
       if (!res.ok) throw Object.assign(new Error(`Reap get-upload-url ${res.status}`), { status: res.status });

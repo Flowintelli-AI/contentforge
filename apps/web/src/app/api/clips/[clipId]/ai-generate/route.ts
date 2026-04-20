@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { db } from "@contentforge/db";
 import { elevenLabsService } from "@/lib/integrations/elevenlabs/service";
-import { searchBroll } from "@/lib/pexels";
 
 export const maxDuration = 300;
 
@@ -37,7 +36,6 @@ async function uploadAudioToR2(clipId: string, audioBase64: string): Promise<str
 }
 
 async function submitShotstackCompose(
-  brollClips: { url: string; duration: number }[],
   audioUrl: string,
   totalDuration: number,
   callbackUrl: string
@@ -47,56 +45,32 @@ async function submitShotstackCompose(
       ? "https://api.shotstack.io/v1"
       : "https://api.shotstack.io/stage";
 
-  // Build video track — loop/trim B-roll clips to fill totalDuration
-  const videoTrackClips: object[] = [];
-  let cursor = 0;
-  let brollIndex = 0;
-
-  while (cursor < totalDuration && brollClips.length > 0) {
-    const clip = brollClips[brollIndex % brollClips.length];
-    const remaining = totalDuration - cursor;
-    const clipLen = Math.min(clip.duration, remaining);
-
-    videoTrackClips.push({
-      asset: { type: "video", src: clip.url },
-      start: cursor,
-      length: clipLen,
-      fit: "crop",
-    });
-
-    cursor += clipLen;
-    brollIndex++;
-  }
-
-  // Fallback: black background if no B-roll
-  if (videoTrackClips.length === 0) {
-    videoTrackClips.push({
-      asset: { type: "color", color: "#111111" },
-      start: 0,
-      length: totalDuration,
-    });
-  }
-
+  // Render a plain dark background + narration audio.
+  // Submagic handles B-roll and captions after this render completes.
   const body = {
     timeline: {
       tracks: [
-        { clips: videoTrackClips }, // track 0 — video / B-roll
         {
           clips: [
             {
-              asset: { type: "audio", src: audioUrl },
+              asset: { type: "color", color: "#111111" },
               start: 0,
               length: totalDuration,
             },
           ],
-        }, // track 1 — narration audio
+        },
       ],
+      soundtrack: {
+        src: audioUrl,
+        effect: "fadeOut",
+        volume: 1.0,
+      },
     },
     output: {
       format: "mp4",
-      resolution: "sd",
+      size: { width: 1080, height: 1920 },
       fps: 30,
-      aspectRatio: "9:16",
+      quality: "medium",
     },
     callback: callbackUrl,
   };
@@ -219,16 +193,12 @@ export async function POST(
       reel.maxSec + 3
     );
 
-    // ── Step 4: Fetch Pexels B-roll ───────────────────────────────────────────
-    const brollQuery = `${clip.format?.replace(/_/g, " ")} ${video.title ?? "creator"}`.trim();
-    const brollClips = await searchBroll(brollQuery, totalDuration);
-
-    // ── Step 5: Submit Shotstack compose render ───────────────────────────────
+    // ── Step 4: Submit Shotstack compose render ───────────────────────────────
+    // Plain background + narration audio only. Submagic adds B-roll + captions.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
     const callbackUrl = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}`;
 
     const shotstackId = await submitShotstackCompose(
-      brollClips,
       audioUrl,
       totalDuration,
       callbackUrl
@@ -236,7 +206,7 @@ export async function POST(
 
     console.log(`[ai-generate] Shotstack render submitted shotstackId=${shotstackId}`);
 
-    // ── Step 6: Update clip to PROCESSING ─────────────────────────────────────
+    // ── Step 5: Update clip to PROCESSING ─────────────────────────────────────
     await db.repurposedClip.update({
       where: { id: clipId },
       data: {

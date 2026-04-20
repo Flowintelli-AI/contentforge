@@ -622,55 +622,73 @@ export async function submitShotstackRender(
     ? [hookCard, ...captionClips]
     : captionClips;
 
-  // ─── Speaker base (Track 2) ───────────────────────────────────────────────
-  // fit:"cover" auto-crops the landscape video to portrait 9:16.
-  // effect:"zoomIn" adds a subtle 105%→100% zoom at the start — stops the scroll.
-  // volume:0 when voiceover present (original audio replaced by ElevenLabs TTS).
-  const speakerClip = {
-    asset: {
-      type: "video",
-      src: videoUrl,
-      trim: segment.startTime,
-      volume: voiceoverUrl ? 0 : 1.0,
-    },
-    start: 0,
-    length: duration,
-    fit: "cover",    // fills 1080×1920 with auto-crop — DO NOT add scale:0
-    effect: "zoomIn", // viral hook energy on first beat
-  };
+  // ─── Track layout depends on whether a voiceover is present ─────────────────
+  //
+  // NO voiceover  → original creator footage as base (original audio, original face).
+  //                 B-roll overlaid as short inserts (~2.5s) for visual variety.
+  //
+  // WITH voiceover → cloned voice narrates a NEW script; showing the creator's face
+  //                  would cause lip-sync desync. B-roll fills the full duration as
+  //                  the base layer instead. Speaker clip is excluded entirely.
+  //
+  // Rule: face = original audio only. Cloned voice = B-roll only.
 
-  // ─── B-roll inserts (Track 1) ─────────────────────────────────────────────
-  // Insert 1-2 short B-roll clips mid-clip so the speaker is still seen at
-  // start/end. Faded transitions make them feel edited, not slapped on.
-  const brollClips = [];
-  if (brollUrl) {
-    const insertDur = Math.min(2.5, duration * 0.18); // ~2-2.5s per insert
-    const insert1Start = Math.round(duration * 0.32 * 10) / 10; // ~32% in
-    brollClips.push({
-      asset: { type: "video", src: brollUrl, trim: 0, volume: 0 },
-      start: insert1Start,
-      length: insertDur,
-      fit: "cover",
-      transition: { in: "fade", out: "fade" },
-    });
-    // Second insert if clip is long enough
-    if (duration >= 22) {
-      const insert2Start = Math.round(duration * 0.62 * 10) / 10; // ~62% in
-      brollClips.push({
-        asset: { type: "video", src: brollUrl, trim: insertDur + 0.5, volume: 0 },
-        start: insert2Start,
-        length: insertDur,
-        fit: "cover",
-        transition: { in: "fade", out: "fade" },
-      });
+  let baseClips: object[];
+  let midClips: object[] = [];
+
+  if (voiceoverUrl) {
+    // ── Cloned-voice path: full B-roll base, no speaker face ──────────────────
+    if (brollUrl) {
+      const insertDur = Math.min(2.5, duration * 0.18);
+      baseClips = [
+        {
+          asset: { type: "video", src: brollUrl, trim: 0, volume: 0 },
+          start: 0,
+          length: duration * 0.5,
+          fit: "cover",
+          transition: { in: "fade", out: "fade" },
+        },
+        {
+          asset: { type: "video", src: brollUrl, trim: insertDur + 0.5, volume: 0 },
+          start: duration * 0.5,
+          length: duration * 0.5,
+          fit: "cover",
+          transition: { in: "fade", out: "fade" },
+        },
+      ];
+    } else {
+      baseClips = [
+        {
+          asset: { type: "color", color: "#111111" },
+          start: 0,
+          length: duration,
+        },
+      ];
     }
+  } else {
+    // ── Original-audio path: speaker face as base, short B-roll inserts ────────
+    // Original audio: show the creator's face for the full duration — no B-roll.
+    baseClips = [
+      {
+        asset: {
+          type: "video",
+          src: videoUrl,
+          trim: segment.startTime,
+          volume: 1.0,
+        },
+        start: 0,
+        length: duration,
+        fit: "cover",
+        effect: "zoomIn",
+      },
+    ];
   }
 
   // ─── Timeline assembly ────────────────────────────────────────────────────
   const tracks = [
-    { clips: overlayClips },                              // Track 0: captions + hook
-    ...(brollClips.length ? [{ clips: brollClips }] : []), // Track 1: b-roll inserts
-    { clips: [speakerClip] },                             // Track 2: speaker (base)
+    { clips: overlayClips },                            // Track 0: captions + hook
+    ...(midClips.length ? [{ clips: midClips }] : []), // Track 1: b-roll inserts (original-audio path only)
+    { clips: baseClips },                              // Track 2: base layer
   ];
 
   const edit: Record<string, unknown> = {
