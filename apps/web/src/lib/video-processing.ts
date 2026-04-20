@@ -38,7 +38,7 @@ async function resolveFfmpegBin(): Promise<string> {
   }
 
   // 3. Download from FFMPEG_BINARY_URL
-  const binaryUrl = process.env.FFMPEG_BINARY_URL;
+  const binaryUrl = process.env.FFMPEG_BINARY_URL?.trim();
   if (!binaryUrl) {
     throw new Error(
       "[video-trim] ffmpeg-static not found and FFMPEG_BINARY_URL is not set. " +

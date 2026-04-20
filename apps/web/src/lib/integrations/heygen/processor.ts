@@ -3,7 +3,7 @@
 
 import { db } from "@contentforge/db";
 import { heyGenService } from "./service";
-import { generateAndUploadVoiceover, trimAndUploadFaceVideo } from "@/lib/video-processing";
+import { generateAndUploadVoiceover } from "@/lib/video-processing";
 import { createLogger } from "../shared/logger";
 
 const logger = createLogger("heygen-processor");
@@ -75,16 +75,17 @@ export async function processAiClip(clipId: string): Promise<void> {
     );
     logger.info("Voiceover ready", { clipId, audioUrl });
 
-    // 2. Trim source video to match TTS duration (saves HeyGen credits)
+    // 2. Determine audio duration for partial lipsync bounds
     const audioDuration = wordTimings.length > 0
       ? wordTimings[wordTimings.length - 1].end
       : 30; // fallback 30s if no timings
-    const faceVideoUrl = await trimAndUploadFaceVideo(
-      video.storagePath,
-      clipId,
-      audioDuration,
-    );
-    logger.info("Face video ready", { clipId, faceVideoUrl, audioDuration });
+    const endTime = Math.ceil(audioDuration) + 2; // slight buffer
+
+    // We send the full source video but use HeyGen's native start_time/end_time
+    // to request a partial lipsync. HeyGen only processes (and charges for) that
+    // slice — no ffmpeg pre-trimming needed.
+    const faceVideoUrl = video.storagePath;
+    logger.info("Face video ready", { clipId, faceVideoUrl, audioDuration, endTime });
 
     // 3. Submit to HeyGen lipsync
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -93,6 +94,8 @@ export async function processAiClip(clipId: string): Promise<void> {
       audioUrl,
       title: clip.title ?? undefined,
       callbackUrl: appUrl ? `${appUrl}/api/webhooks/heygen` : undefined,
+      startTime: 0,
+      endTime,
     });
 
     // 3. Mark as PROCESSING and store lipsyncId so the webhook can correlate

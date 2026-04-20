@@ -41,6 +41,14 @@ export interface LipsyncParams {
   title?: string;
   /** Webhook URL for completion notification */
   callbackUrl?: string;
+  /**
+   * Start time in seconds for partial lipsync (HeyGen /v3/lipsyncs native param).
+   * Use with endTime to avoid sending a pre-trimmed video — HeyGen processes only
+   * the specified range, so we're charged only for that duration.
+   */
+  startTime?: number;
+  /** End time in seconds for partial lipsync */
+  endTime?: number;
 }
 
 export interface LipsyncResult {

@@ -155,6 +155,10 @@ class LiveHeyGenService implements IHeyGenService {
         mode: "speed",
         ...(params.title ? { title: params.title } : {}),
         ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
+        // Partial lipsync: HeyGen processes only this time range and charges accordingly.
+        // This lets us send the full source video without pre-trimming via ffmpeg.
+        ...(params.startTime !== undefined ? { start_time: params.startTime } : {}),
+        ...(params.endTime !== undefined ? { end_time: params.endTime } : {}),
       };
       logger.info("HeyGen lipsync request", {
         endpoint: "POST /v3/lipsyncs",
