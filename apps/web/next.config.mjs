@@ -3,8 +3,9 @@ const nextConfig = {
   // Prevent webpack from bundling native binaries — resolved at runtime from node_modules
   serverExternalPackages: ["ffmpeg-static"],
   // Explicitly include the ffmpeg binary in Vercel's output file tracing
+  // Use "**" wildcard — route-specific keys don't match App Router compiled paths
   outputFileTracingIncludes: {
-    "/api/webhooks/assemblyai": ["./node_modules/ffmpeg-static/**/*"],
+    "**": ["./node_modules/ffmpeg-static/**"],
   },
   images: {
     remotePatterns: [
