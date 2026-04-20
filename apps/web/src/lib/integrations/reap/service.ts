@@ -98,6 +98,8 @@ class ReapService {
           enableEmojis: options.enableEmojis ?? true,
           enableHighlights: options.enableHighlights ?? true,
           language: options.language ?? "en",
+          reframeClips: true,
+          exportResolution: 1080,
           ...(options.selectedStart != null ? { selectedStart: options.selectedStart } : {}),
           ...(options.selectedEnd != null ? { selectedEnd: options.selectedEnd } : {}),
           ...(options.webhookUrl ? { webhookUrl: options.webhookUrl } : {}),
