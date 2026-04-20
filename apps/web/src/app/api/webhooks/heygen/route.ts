@@ -9,11 +9,13 @@ import { createLogger } from "@/lib/integrations/shared/logger";
 
 const logger = createLogger("heygen-webhook");
 
-// HeyGen sends slightly different shapes for avatar vs lipsync — keep broad
+// HeyGen sends slightly different shapes for avatar vs lipsync — keep broad.
+// v3 lipsync uses event_data.id; v2 avatar videos use event_data.video_id.
 interface HeyGenWebhookPayload {
   event_type: string;
   event_data: {
-    video_id: string;
+    video_id?: string;
+    id?: string; // v3 lipsync uses this field
     url?: string;
     thumbnail_url?: string;
     duration?: number;
@@ -43,7 +45,9 @@ export async function POST(req: Request) {
 
   const isSuccess = event_type.includes("success") || event_type.includes("complete");
   const isFailed = event_type.includes("fail") || event_type.includes("error");
-  const { video_id, url: videoUrl, error: errorMsg } = event_data;
+  // Support both v3 (id) and v2 (video_id) event shapes
+  const video_id = event_data.id ?? event_data.video_id ?? "";
+  const { url: videoUrl, error: errorMsg } = event_data;
 
   // ── Lipsync clip (RepurposedClip.opusClipId = "heygen:<video_id>") ─────────
   // Check this BEFORE the AiVideoJob lookup so lipsync clips take priority.

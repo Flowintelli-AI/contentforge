@@ -149,17 +149,17 @@ class LiveHeyGenService implements IHeyGenService {
 
   async submitLipsync(params: LipsyncParams): Promise<LipsyncResult> {
     return withRetry(async () => {
-      const data = await this.request<{ data: { video_id: string } }>("/v2/video.lipsync", {
+      const data = await this.request<{ data: { id: string } }>("/v3/lipsyncs", {
         method: "POST",
         body: JSON.stringify({
-          video_url: params.faceVideoUrl,
-          audio_url: params.audioUrl,
+          video: { type: "url", url: params.faceVideoUrl },
+          audio: { type: "url", url: params.audioUrl },
           ...(params.title ? { title: params.title } : {}),
           ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
         }),
       });
-      logger.info("HeyGen lipsync job created", { lipsyncId: data.data.video_id });
-      return { lipsyncId: data.data.video_id, status: "processing" };
+      logger.info("HeyGen lipsync job created", { lipsyncId: data.data.id });
+      return { lipsyncId: data.data.id, status: "processing" };
     }, { shouldRetry: isRetryableHttpError });
   }
 
@@ -167,16 +167,16 @@ class LiveHeyGenService implements IHeyGenService {
     return withRetry(async () => {
       const data = await this.request<{
         data: {
-          video_id: string;
+          id: string;
           status: string;
           video_url?: string;
           error?: string;
         };
-      }>(`/v1/video_status.get?video_id=${lipsyncId}`);
+      }>(`/v3/lipsyncs/${lipsyncId}`);
 
       const d = data.data;
       return {
-        lipsyncId: d.video_id,
+        lipsyncId: d.id,
         status: d.status as LipsyncStatus["status"],
         downloadUrl: d.video_url,
         errorMessage: d.error,
