@@ -111,7 +111,7 @@ class LiveHeyGenService implements IHeyGenService {
               },
             ],
             aspect_ratio: params.aspectRatio ?? "9:16",
-            test: process.env.NODE_ENV !== "production",
+            test: false,
             caption: false,
           }),
         });
@@ -149,17 +149,19 @@ class LiveHeyGenService implements IHeyGenService {
 
   async submitLipsync(params: LipsyncParams): Promise<LipsyncResult> {
     return withRetry(async () => {
-      const data = await this.request<{ data: { id: string } }>("/v3/lipsyncs", {
+      const data = await this.request<{ data: { lipsync_id: string } }>("/v3/lipsyncs", {
         method: "POST",
         body: JSON.stringify({
           video: { type: "url", url: params.faceVideoUrl },
           audio: { type: "url", url: params.audioUrl },
+          mode: "speed",
+          test: false,
           ...(params.title ? { title: params.title } : {}),
           ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
         }),
       });
-      logger.info("HeyGen lipsync job created", { lipsyncId: data.data.id });
-      return { lipsyncId: data.data.id, status: "processing" };
+      logger.info("HeyGen lipsync job created", { lipsyncId: data.data.lipsync_id });
+      return { lipsyncId: data.data.lipsync_id, status: "processing" };
     }, { shouldRetry: isRetryableHttpError });
   }
 
@@ -170,7 +172,7 @@ class LiveHeyGenService implements IHeyGenService {
           id: string;
           status: string;
           video_url?: string;
-          error?: string;
+          failure_message?: string;
         };
       }>(`/v3/lipsyncs/${lipsyncId}`);
 
@@ -179,7 +181,7 @@ class LiveHeyGenService implements IHeyGenService {
         lipsyncId: d.id,
         status: d.status as LipsyncStatus["status"],
         downloadUrl: d.video_url,
-        errorMessage: d.error,
+        errorMessage: d.failure_message,
       };
     }, { shouldRetry: isRetryableHttpError });
   }
