@@ -857,27 +857,47 @@ export async function trimVideoWithShotstack(
   videoUrl: string,
   durationSec: number,
   webhookUrl: string,
+  musicUrl?: string,
 ): Promise<string> {
   const apiKey = process.env.SHOTSTACK_API_KEY;
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
 
   const env = process.env.SHOTSTACK_ENV ?? "stage";
 
-  const edit = {
-    timeline: {
-      tracks: [
+  const tracks: object[] = [
+    {
+      clips: [
         {
-          clips: [
-            {
-              asset: { type: "video", src: videoUrl, trim: 0, volume: 1.0 },
-              start: 0,
-              length: durationSec,
-              fit: "cover",
-            },
-          ],
+          asset: { type: "video", src: videoUrl, trim: 0, volume: 1.0 },
+          start: 0,
+          length: durationSec,
+          fit: "cover",
         },
       ],
     },
+  ];
+
+  // Mix background music at 15% volume under the creator's voice
+  if (musicUrl) {
+    tracks.push({
+      clips: [
+        {
+          asset: {
+            type: "audio",
+            src: musicUrl,
+            trim: 0,
+            volume: 0.15,
+            effect: "fadeOut",
+          },
+          start: 0,
+          length: durationSec,
+        },
+      ],
+    });
+  }
+
+  const edit = {
+    timeline: { tracks },
     output: {
       format: "mp4",
       size: { width: 1080, height: 1920 },

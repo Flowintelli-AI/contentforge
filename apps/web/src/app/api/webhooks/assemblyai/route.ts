@@ -60,6 +60,7 @@ interface MissingFramework {
   platform: string;
   reason: string;
   suggestedScript: string;
+  mood: "motivational" | "educational" | "inspiring" | "energetic";
 }
 
 interface ViralMomentsResult {
@@ -196,7 +197,8 @@ Return ONLY valid JSON, no markdown, no explanation:
       "framework": "hot_take",
       "platform": "tiktok",
       "reason": "No strong controversial opinions or polarizing statements found in this content",
-      "suggestedScript": "Stop optimizing for likes. Likes do not pay your bills. The creators actually scaling their revenue track one metric: click-through on the link in bio. Vanity metrics are the enemy of real growth. Measure what converts, ignore everything else."
+      "suggestedScript": "Stop optimizing for likes. Likes do not pay your bills. The creators actually scaling their revenue track one metric: click-through on the link in bio. Vanity metrics are the enemy of real growth. Measure what converts, ignore everything else.",
+      "mood": "motivational"
     }
   ]
 }`;
@@ -427,6 +429,7 @@ export async function POST(req: Request) {
           format: missing.framework,
           reelScript: {
             suggestedScript: missing.suggestedScript,
+            mood: missing.mood ?? "motivational",
             reason: missing.reason,
             frameworkName: fw.name,
             targetSec: targetDuration,
