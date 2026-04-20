@@ -2,16 +2,60 @@ import OpenAI from "openai";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { createReadStream, createWriteStream } from "fs";
-import { unlink } from "fs/promises";
+import { createReadStream, createWriteStream, existsSync } from "fs";
+import { unlink, chmod } from "fs/promises";
 import { pipeline } from "stream/promises";
 import * as path from "path";
+
+// Path where we cache a downloaded ffmpeg binary in /tmp (persists across warm invocations)
+const TMP_FFMPEG = "/tmp/ffmpeg-bin";
 
 let ffmpegBin: string | null = null;
 try {
   // eslint-disable-next-line no-eval
   ffmpegBin = eval('require')('ffmpeg-static') as string;
 } catch {}
+
+/**
+ * Resolves the ffmpeg binary path.
+ * Priority:
+ *   1. ffmpeg-static from node_modules (works locally, may work on Vercel if tracing picks it up)
+ *   2. /tmp/ffmpeg-bin cached from a previous cold-start download
+ *   3. Download from FFMPEG_BINARY_URL env var into /tmp/ffmpeg-bin
+ *
+ * Throws if no binary can be resolved — we do NOT silently fall back to sending
+ * a 5-minute source video to HeyGen (that costs $2/min in Speed mode).
+ */
+async function resolveFfmpegBin(): Promise<string> {
+  // 1. From node_modules (local dev or if Vercel tracing worked)
+  if (ffmpegBin && existsSync(ffmpegBin)) {
+    return ffmpegBin;
+  }
+
+  // 2. Already downloaded in this lambda instance's /tmp
+  if (existsSync(TMP_FFMPEG)) {
+    return TMP_FFMPEG;
+  }
+
+  // 3. Download from FFMPEG_BINARY_URL
+  const binaryUrl = process.env.FFMPEG_BINARY_URL;
+  if (!binaryUrl) {
+    throw new Error(
+      "[video-trim] ffmpeg-static not found and FFMPEG_BINARY_URL is not set. " +
+      "Upload a Linux x64 ffmpeg binary to R2 and set FFMPEG_BINARY_URL in Vercel env vars."
+    );
+  }
+
+  console.log(`[video-trim] Downloading ffmpeg binary from ${binaryUrl} ...`);
+  const res = await fetch(binaryUrl);
+  if (!res.ok || !res.body) {
+    throw new Error(`[video-trim] Failed to download ffmpeg binary: HTTP ${res.status}`);
+  }
+  await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(TMP_FFMPEG));
+  await chmod(TMP_FFMPEG, 0o755);
+  console.log("[video-trim] ✅ ffmpeg binary downloaded and ready at", TMP_FFMPEG);
+  return TMP_FFMPEG;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -289,10 +333,8 @@ export async function trimAndUploadFaceVideo(
   clipId: string,
   durationSec: number,
 ): Promise<string> {
-  if (!ffmpegBin) {
-    console.warn("[video-trim] ffmpeg-static unavailable — using full source video");
-    return sourceVideoUrl;
-  }
+  // Resolve binary — throws if unavailable (no silent fallback; full video = expensive HeyGen bill)
+  const bin = await resolveFfmpegBin();
 
   const trimSec = Math.ceil(durationSec) + 2; // slight buffer
   const tmpDir = "/tmp";
@@ -301,12 +343,13 @@ export async function trimAndUploadFaceVideo(
 
   try {
     // Download source video to /tmp
+    console.log(`[video-trim] Downloading source video (will trim to ${trimSec}s)...`);
     const res = await fetch(sourceVideoUrl);
     if (!res.ok || !res.body) throw new Error(`Failed to fetch source video: ${res.status}`);
     await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(inputPath));
 
     // Trim with ffmpeg (-c copy = no re-encode, fast)
-    await execFileAsync(ffmpegBin!, [
+    await execFileAsync(bin, [
       "-i", inputPath,
       "-t", String(trimSec),
       "-c", "copy",
@@ -326,9 +369,6 @@ export async function trimAndUploadFaceVideo(
     const url = `${process.env.R2_PUBLIC_URL}/${key}`;
     console.log(`[video-trim] ✅ Trimmed to ${trimSec}s → ${url}`);
     return url;
-  } catch (err) {
-    console.error("[video-trim] ⚠️ Trim failed — falling back to source", err);
-    return sourceVideoUrl;
   } finally {
     await Promise.allSettled([unlink(inputPath), unlink(outputPath)]);
   }
