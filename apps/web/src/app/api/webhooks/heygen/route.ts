@@ -10,16 +10,20 @@ import { createLogger } from "@/lib/integrations/shared/logger";
 const logger = createLogger("heygen-webhook");
 
 // HeyGen sends slightly different shapes for avatar vs lipsync — keep broad.
-// v3 lipsync uses event_data.id; v2 avatar videos use event_data.video_id.
+// v3 lipsync webhook uses event_type="video_translate.*" and event_data.video_translate_id
+// v2 avatar videos use event_data.video_id
 interface HeyGenWebhookPayload {
   event_type: string;
   event_data: {
     video_id?: string;
-    id?: string; // v3 lipsync uses this field
+    id?: string;
+    video_translate_id?: string; // v3 lipsync uses this field
     url?: string;
+    video_url?: string; // v3 lipsync success URL field
     thumbnail_url?: string;
     duration?: number;
     error?: string;
+    message?: string; // v3 lipsync error message field
   };
 }
 
@@ -45,9 +49,10 @@ export async function POST(req: Request) {
 
   const isSuccess = event_type.includes("success") || event_type.includes("complete");
   const isFailed = event_type.includes("fail") || event_type.includes("error");
-  // Support both v3 (id) and v2 (video_id) event shapes
-  const video_id = event_data.id ?? event_data.video_id ?? "";
-  const { url: videoUrl, error: errorMsg } = event_data;
+  // Support all HeyGen event shapes: video_translate_id (v3 lipsync), id, or video_id
+  const video_id = event_data.video_translate_id ?? event_data.id ?? event_data.video_id ?? "";
+  const videoUrl = event_data.video_url ?? event_data.url;
+  const errorMsg = event_data.message ?? event_data.error;
 
   // ── Lipsync clip (RepurposedClip.opusClipId = "heygen:<video_id>") ─────────
   // Check this BEFORE the AiVideoJob lookup so lipsync clips take priority.
