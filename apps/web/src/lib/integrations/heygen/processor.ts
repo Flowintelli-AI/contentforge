@@ -91,16 +91,16 @@ export async function processAiClip(clipId: string): Promise<void> {
     const encodedAudioUrl = encodeURIComponent(audioUrl);
     const shotstackCallback = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}&purpose=heygen&audioUrl=${encodedAudioUrl}`;
 
-    // Fetch a mood-matched royalty-free track from Pixabay (null = no music)
-    const musicUrl = await fetchMoodTrack(reelScript?.mood);
+    // Music disabled temporarily — re-enable after e2e test passes
+    // const musicUrl = await fetchMoodTrack(reelScript?.mood);
 
     const renderId = await trimVideoWithShotstack(
       video.storagePath,
       trimDuration,
       shotstackCallback,
-      musicUrl ?? undefined,
+      undefined, // no music until R2 tracks are uploaded
     );
-    logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration, mood: reelScript?.mood ?? "motivational", musicUrl });
+    logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration, mood: reelScript?.mood ?? "motivational" });
 
     // 4. Mark as PROCESSING — Shotstack webhook fires when trim is done,
     //    then submits to HeyGen, then HeyGen webhook fires → Reap → READY
