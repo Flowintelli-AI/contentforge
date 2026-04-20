@@ -9,9 +9,9 @@ import { NextResponse } from "next/server";
 
 export const maxDuration = 60;
 
-// Reap sends a GET request to validate the webhook endpoint
+// Reap sends a GET request to validate the webhook — must return empty 200
 export async function GET() {
-  return new Response("OK", { status: 200 });
+  return new Response(null, { status: 200 });
 }
 
 type ReapPayload = Record<string, unknown>;
