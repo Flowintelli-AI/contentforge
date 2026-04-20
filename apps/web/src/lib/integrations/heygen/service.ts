@@ -149,15 +149,21 @@ class LiveHeyGenService implements IHeyGenService {
 
   async submitLipsync(params: LipsyncParams): Promise<LipsyncResult> {
     return withRetry(async () => {
+      const payload = {
+        video: { type: "url", url: params.faceVideoUrl },
+        audio: { type: "url", url: params.audioUrl },
+        mode: "speed",
+        ...(params.title ? { title: params.title } : {}),
+        ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
+      };
+      logger.info("HeyGen lipsync request", {
+        endpoint: "POST /v3/lipsyncs",
+        payload,
+        curl: `curl -X POST https://api.heygen.com/v3/lipsyncs -H "Content-Type: application/json" -H "X-Api-Key: ***" -d '${JSON.stringify(payload)}'`,
+      });
       const data = await this.request<{ data: { lipsync_id: string } }>("/v3/lipsyncs", {
         method: "POST",
-        body: JSON.stringify({
-          video: { type: "url", url: params.faceVideoUrl },
-          audio: { type: "url", url: params.audioUrl },
-          mode: "speed",
-          ...(params.title ? { title: params.title } : {}),
-          ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
-        }),
+        body: JSON.stringify(payload),
       });
       logger.info("HeyGen lipsync job created", { lipsyncId: data.data.lipsync_id });
       return { lipsyncId: data.data.lipsync_id, status: "processing" };
