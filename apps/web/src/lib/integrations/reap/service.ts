@@ -24,8 +24,8 @@ export interface ReapCaptionsOptions {
 }
 
 interface UploadUrlResponse {
-  uploadId: string;
-  presignedUrl: string;
+  id: string;
+  uploadUrl: string;
 }
 
 interface CreateCaptionsResponse {
@@ -52,6 +52,7 @@ class ReapService {
       const res = await fetch(`${REAP_BASE}/get-upload-url`, {
         method: "POST",
         headers: this.headers,
+        body: JSON.stringify({ filename: "clip.mp4" }),
       });
       if (!res.ok) throw Object.assign(new Error(`Reap get-upload-url ${res.status}`), { status: res.status });
       return res.json() as Promise<UploadUrlResponse>;
@@ -113,7 +114,7 @@ class ReapService {
   async submitCaptions(videoUrl: string, options: ReapCaptionsOptions = {}): Promise<string> {
     logger.info("Starting Reap captions upload", { videoUrl });
 
-    const { uploadId, presignedUrl } = await this.getUploadUrl();
+    const { id: uploadId, uploadUrl: presignedUrl } = await this.getUploadUrl();
     logger.info("Got Reap upload URL", { uploadId });
 
     await this.uploadVideo(presignedUrl, videoUrl);
