@@ -377,11 +377,25 @@ export async function POST(req: Request) {
   }
 
   // Create GENERATING_AI clips for missing frameworks — AI fill pipeline handles the rest
+  // Cap: skip AI fill for any platform that already has ≥1 Type 1 (found) clip.
+  // Type 1 clips don't use HeyGen; Type 2 clips do — no point burning credits when
+  // the platform is already covered by original footage.
+  const platformsCoveredByType1 = new Set(
+    result.clips.map((c) => FRAMEWORKS.find((f) => f.id === c.framework)?.platform).filter(Boolean)
+  );
+
   let aiQueued = 0;
   const aiClipIds: string[] = [];
   for (const missing of result.missing) {
     const fw = FRAMEWORKS.find((f) => f.id === missing.framework);
     if (!fw) continue;
+
+    if (platformsCoveredByType1.has(fw.platform)) {
+      console.log(
+        `[assemblyai] skipping AI fill for ${missing.framework} (${fw.platform} already covered by Type 1 clip)`
+      );
+      continue;
+    }
 
     // Target the midpoint of the framework's duration range
     const targetDuration = Math.round((fw.minSec + fw.maxSec) / 2);
