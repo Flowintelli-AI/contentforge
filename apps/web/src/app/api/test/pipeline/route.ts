@@ -52,7 +52,7 @@ function checkSecret(req: Request): NextResponse | null {
 async function fetchVideoRecord(videoId: string) {
   return db.uploadedVideo.findUnique({
     where: { id: videoId },
-    include: { creatorProfile: { select: { id: true } } },
+    include: { creator: { select: { id: true } } },
   });
 }
 
