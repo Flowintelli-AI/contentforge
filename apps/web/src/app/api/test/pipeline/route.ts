@@ -261,6 +261,36 @@ export async function GET(req: Request) {
     }
   }
 
+  // ── shotstack-poll ──────────────────────────────────────────────────────────
+  if (stage === "shotstack-poll") {
+    const renderId = url.searchParams.get("renderId") ?? "";
+    if (!renderId) return NextResponse.json({ error: "renderId param required" }, { status: 400 });
+
+    const apiKey = process.env.SHOTSTACK_API_KEY;
+    const env = process.env.SHOTSTACK_ENV ?? "stage";
+    if (!apiKey) return NextResponse.json({ error: "SHOTSTACK_API_KEY not set" }, { status: 500 });
+
+    try {
+      const res = await fetch(`https://api.shotstack.io/${env}/render/${renderId}`, {
+        headers: { "x-api-key": apiKey },
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        return fail("shotstack-poll", new Error(`Shotstack ${res.status}: ${body}`));
+      }
+      const data = (await res.json()) as { response: { status: string; url?: string; error?: string } };
+      return ok("shotstack-poll", {
+        renderId,
+        status: data.response.status,
+        url: data.response.url ?? null,
+        error: data.response.error ?? null,
+        ready: data.response.status === "done",
+      });
+    } catch (err) {
+      return fail("shotstack-poll", err);
+    }
+  }
+
   // ── reap ─────────────────────────────────────────────────────────────────────
   if (stage === "reap") {
     const videoUrl = url.searchParams.get("videoUrl") ?? "";
@@ -320,6 +350,7 @@ export async function GET(req: Request) {
       "tts         — generate TTS audio (?voiceId=... &script=...)",
       "transcription — submit to AssemblyAI (async)",
       "shotstack   — submit a trim render (?start=0&end=10&rotation=0)",
+      "shotstack-poll — check render status (?renderId=...)",
       "reap        — submit captions (?videoUrl=https://...)",
       "heygen      — submit lipsync (?faceVideoUrl=...&audioUrl=...) (⚠️ costs credits)",
     ],
