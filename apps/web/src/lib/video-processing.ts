@@ -853,29 +853,85 @@ export async function submitShotstackRender(
  *
  * Returns the Shotstack render ID. The webhook fires when the trimmed clip is ready.
  */
+/**
+ * Detects the display rotation stored in a phone MP4's tkhd atom.
+ * Returns the Shotstack correction angle needed (0, 90, -90, or 180).
+ * Phone portrait videos are stored as landscape with rotation=-90 → returns 90.
+ * Fetches the last 2MB where the moov atom lives in non-faststart MP4s.
+ */
+export async function detectVideoRotation(videoUrl: string): Promise<number> {
+  try {
+    const headRes = await fetch(videoUrl, { method: "HEAD" });
+    const contentLength = parseInt(headRes.headers.get("content-length") ?? "0", 10);
+    if (!contentLength) return 0;
+
+    // Fetch last 2MB — moov is at end for non-faststart (typical phone recordings)
+    const fetchStart = Math.max(0, contentLength - 2 * 1024 * 1024);
+    const rangeRes = await fetch(videoUrl, {
+      headers: { Range: `bytes=${fetchStart}-${contentLength - 1}` },
+    });
+    const raw = new Uint8Array(await rangeRes.arrayBuffer());
+    const view = new DataView(raw.buffer);
+
+    // Search for "tkhd" (0x74 0x6B 0x68 0x64) — Track Header Box contains the rotation matrix
+    for (let i = 0; i < raw.length - 80; i++) {
+      if (
+        raw[i] === 0x74 && raw[i + 1] === 0x6b &&
+        raw[i + 2] === 0x68 && raw[i + 3] === 0x64
+      ) {
+        const version = raw[i + 4]; // 0 or 1
+        // Matrix offset from start of "tkhd" bytes:
+        // version 0: 4(type)+4(ver+flags)+4(ctime)+4(mtime)+4(trackId)+4(rsv)+4(dur)+8(rsv)+2+2+2+2 = 44
+        // version 1: 4(type)+4(ver+flags)+8(ctime)+8(mtime)+4(trackId)+4(rsv)+8(dur)+8(rsv)+2+2+2+2 = 56
+        const matrixOffset = i + (version === 1 ? 56 : 44);
+        if (matrixOffset + 36 > raw.length) continue;
+
+        // Matrix is 3×3 in 16.16 fixed-point (last column 2.30).
+        // a=[0][0], b=[0][1], d=[1][1] determine rotation.
+        const a = view.getInt32(matrixOffset, false);      // [0][0]
+        const b = view.getInt32(matrixOffset + 4, false);  // [0][1]
+        const d = view.getInt32(matrixOffset + 16, false); // [1][1]
+
+        // Rotation in metadata → Shotstack correction angle:
+        //  -90° stored (Samsung portrait): a=0, b=+65536, d=0 → fix with +90
+        //  +90° stored (upside-down portrait): a=0, b=-65536, d=0 → fix with -90
+        //  180° stored: a=-65536, b=0, d=-65536 → fix with 180
+        //  no rotation: a=+65536, b=0, d=+65536 → 0
+        if (a === 0 && b > 0 && d === 0) return 90;
+        if (a === 0 && b < 0 && d === 0) return -90;
+        if (a < 0 && b === 0 && d < 0) return 180;
+        return 0;
+      }
+    }
+    return 0;
+  } catch {
+    return 0; // Non-fatal — assume no rotation
+  }
+}
+
 export async function trimVideoWithShotstack(
   videoUrl: string,
   durationSec: number,
   webhookUrl: string,
   musicUrl?: string,
+  rotationDeg: number = 0,
 ): Promise<string> {
   const apiKey = process.env.SHOTSTACK_API_KEY;
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
 
   const env = process.env.SHOTSTACK_ENV ?? "stage";
 
-  const tracks: object[] = [
-    {
-      clips: [
-        {
-          asset: { type: "video", src: videoUrl, trim: 0, volume: 1.0 },
-          start: 0,
-          length: durationSec,
-          fit: "cover",
-        },
-      ],
-    },
-  ];
+  const videoClip: Record<string, unknown> = {
+    asset: { type: "video", src: videoUrl, trim: 0, volume: 1.0 },
+    start: 0,
+    length: durationSec,
+    fit: "cover",
+  };
+  if (rotationDeg !== 0) {
+    videoClip.transform = { rotate: { angle: rotationDeg } };
+  }
+
+  const tracks: object[] = [{ clips: [videoClip] }];
 
   // Mix background music at 15% volume under the creator's voice
   if (musicUrl) {
