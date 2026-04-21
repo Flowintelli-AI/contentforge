@@ -1,10 +1,8 @@
 // ─── Reap.video service ───────────────────────────────────────────────────────
-// Handles uploading a rendered video to Reap and creating a captions project.
+// Handles captioning videos via Reap automation API.
 //
-// Flow:
-//   1. GET  /get-upload-url  → { uploadId, presignedUrl }
-//   2. PUT  presignedUrl     ← stream video from Shotstack CDN (no buffering)
-//   3. POST /create-captions → { projectId }
+// Flow: POST /create-captions with sourceUrl → { projectId }
+// Using sourceUrl (vs uploadId) enables the resolution param (1080p).
 
 import { createLogger } from "../shared/logger";
 import { withRetry, isRetryableHttpError } from "../shared/retry";
@@ -21,11 +19,6 @@ export interface ReapCaptionsOptions {
   selectedStart?: number;    // seconds — caption a sub-range of the video
   selectedEnd?: number;
   webhookUrl?: string;       // fires when project completes/fails
-}
-
-interface UploadUrlResponse {
-  id: string;
-  uploadUrl: string;
 }
 
 interface CreateCaptionsResponse {
@@ -46,46 +39,9 @@ class ReapService {
     };
   }
 
-  // Step 1 — get a presigned upload URL from Reap
-  private async getUploadUrl(): Promise<UploadUrlResponse> {
-    return withRetry(async () => {
-      const res = await fetch(`${REAP_BASE}/get-upload-url`, {
-        method: "POST",
-        headers: this.headers,
-        body: JSON.stringify({ filename: "clip.mp4" }),
-      });
-      if (!res.ok) throw Object.assign(new Error(`Reap get-upload-url ${res.status}`), { status: res.status });
-      return res.json() as Promise<UploadUrlResponse>;
-    }, { shouldRetry: isRetryableHttpError });
-  }
-
-  // Step 2 — download video to buffer then PUT to Reap's S3 presigned URL.
-  // S3 presigned URLs require Content-Length — chunked/streaming is not supported.
-  private async uploadVideo(presignedUrl: string, videoUrl: string): Promise<void> {
-    const sourceRes = await fetch(videoUrl);
-    if (!sourceRes.ok || !sourceRes.body) {
-      throw new Error(`Failed to fetch source video: ${sourceRes.status}`);
-    }
-
-    const buffer = Buffer.from(await sourceRes.arrayBuffer());
-
-    const uploadRes = await fetch(presignedUrl, {
-      method: "PUT",
-      body: buffer,
-      headers: {
-        "Content-Type": "video/mp4",
-        "Content-Length": String(buffer.byteLength),
-      },
-    });
-    if (!uploadRes.ok) {
-      const body = await uploadRes.text();
-      throw new Error(`Reap presigned upload failed: ${uploadRes.status} ${body}`);
-    }
-  }
-
-  // Step 3 — create the captions project
+  // Using sourceUrl (not uploadId) so the `resolution` param is respected by the API
   private async createCaptions(
-    uploadId: string,
+    sourceUrl: string,
     options: ReapCaptionsOptions
   ): Promise<CreateCaptionsResponse> {
     return withRetry(async () => {
@@ -93,13 +49,13 @@ class ReapService {
         method: "POST",
         headers: this.headers,
         body: JSON.stringify({
-          uploadId,
+          sourceUrl,
           captionsPreset: options.captionsPreset ?? "karaoke-bold",
           enableEmojis: options.enableEmojis ?? true,
           enableHighlights: options.enableHighlights ?? true,
           language: options.language ?? "en",
           reframeClips: true,
-          exportResolution: 1080,
+          resolution: 1080,
           ...(options.selectedStart != null ? { selectedStart: options.selectedStart } : {}),
           ...(options.selectedEnd != null ? { selectedEnd: options.selectedEnd } : {}),
           ...(options.webhookUrl ? { webhookUrl: options.webhookUrl } : {}),
@@ -114,19 +70,13 @@ class ReapService {
   }
 
   /**
-   * Upload `videoUrl` to Reap and kick off a captions project.
+   * Kick off a Reap captions project directly from a video URL.
    * Returns the Reap `projectId` — store this to correlate the webhook.
    */
   async submitCaptions(videoUrl: string, options: ReapCaptionsOptions = {}): Promise<string> {
-    logger.info("Starting Reap captions upload", { videoUrl });
+    logger.info("Starting Reap captions project", { videoUrl });
 
-    const { id: uploadId, uploadUrl: presignedUrl } = await this.getUploadUrl();
-    logger.info("Got Reap upload URL", { uploadId });
-
-    await this.uploadVideo(presignedUrl, videoUrl);
-    logger.info("Video uploaded to Reap", { uploadId });
-
-    const { id: projectId } = await this.createCaptions(uploadId, options);
+    const { id: projectId } = await this.createCaptions(videoUrl, options);
     logger.info("Reap captions project created", { projectId });
 
     return projectId;
