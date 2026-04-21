@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
+import { detectVideoRotation } from "@/lib/video-processing";
 
 export const maxDuration = 60;
 
@@ -76,6 +77,13 @@ export async function POST(
       waitUntil(performVoiceClone(video.id, video.storagePath, elevenKey));
     }
 
+    // Detect rotation once and cache it — both pipelines will read the cached value.
+    // Most videos are already correctly oriented; this is a lightweight background check.
+    const existingMeta = (video.metadata ?? {}) as Record<string, unknown>;
+    if (existingMeta.videoRotation === undefined) {
+      waitUntil(detectAndCacheRotation(video.id, video.storagePath, existingMeta));
+    }
+
     return NextResponse.json({ success: true, message: "10 clips are rendering — check back in a few minutes!" });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed";
@@ -88,7 +96,24 @@ export async function POST(
   }
 }
 
-// Runs in background via waitUntil — submits the R2 video URL directly to
+async function detectAndCacheRotation(
+  videoId: string,
+  storagePath: string,
+  existingMeta: Record<string, unknown>,
+) {
+  try {
+    const rotationDeg = await detectVideoRotation(storagePath);
+    await db.uploadedVideo.update({
+      where: { id: videoId },
+      data: { metadata: { ...existingMeta, videoRotation: rotationDeg } },
+    });
+    if (rotationDeg !== 0) {
+      console.log(`[process] video=${videoId} rotation cached: ${rotationDeg}°`);
+    }
+  } catch (err) {
+    console.warn(`[process] rotation detection failed for video=${videoId} (non-fatal):`, err);
+  }
+}
 // ElevenLabs IVC using files_url. This avoids byte-range truncation which
 // corrupts the MP4 container (moov atom is at the end of phone recordings).
 // Non-fatal: any failure is logged, webhook falls back to ELEVENLABS_VOICE_ID.

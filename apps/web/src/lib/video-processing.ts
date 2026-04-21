@@ -915,6 +915,7 @@ export async function trimVideoWithShotstack(
   webhookUrl: string,
   musicUrl?: string,
   rotationDeg: number = 0,
+  startTrimSec: number = 0,
 ): Promise<string> {
   const apiKey = process.env.SHOTSTACK_API_KEY;
   if (!apiKey) throw new Error("SHOTSTACK_API_KEY is not set");
@@ -922,7 +923,7 @@ export async function trimVideoWithShotstack(
   const env = process.env.SHOTSTACK_ENV ?? "stage";
 
   const videoClip: Record<string, unknown> = {
-    asset: { type: "video", src: videoUrl, trim: 0, volume: 1.0 },
+    asset: { type: "video", src: videoUrl, trim: startTrimSec, volume: 1.0 },
     start: 0,
     length: durationSec,
     fit: "cover",

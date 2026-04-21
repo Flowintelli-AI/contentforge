@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { waitUntil } from "@vercel/functions";
 import { processAiClip } from "@/lib/integrations/heygen/processor";
+import { trimVideoWithShotstack } from "@/lib/video-processing";
 
 export const maxDuration = 60;
 
@@ -233,48 +234,10 @@ async function submitShotstackTrim(
   videoUrl: string,
   startSec: number,
   durationSec: number,
-  callbackUrl: string
+  callbackUrl: string,
+  rotationDeg: number = 0,
 ): Promise<string> {
-  const shotstackBase = process.env.SHOTSTACK_ENV === "production"
-    ? "https://api.shotstack.io/v1"
-    : "https://api.shotstack.io/stage";
-  const res = await fetch(`${shotstackBase}/render`, {
-    method: "POST",
-    headers: {
-      "x-api-key": process.env.SHOTSTACK_API_KEY!,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      timeline: {
-        tracks: [
-          {
-            clips: [
-              {
-                asset: { type: "video", src: videoUrl, trim: startSec },
-                start: 0,
-                length: durationSec,
-                scale: 1,
-              },
-            ],
-          },
-        ],
-      },
-      output: {
-        format: "mp4",
-        resolution: "sd",
-        fps: 30,
-      },
-      callback: callbackUrl,
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Shotstack trim render failed: ${err}`);
-  }
-
-  const data = (await res.json()) as { response: { id: string } };
-  return data.response.id;
+  return trimVideoWithShotstack(videoUrl, durationSec, callbackUrl, undefined, rotationDeg, startSec);
 }
 
 export async function POST(req: Request) {
@@ -356,6 +319,10 @@ export async function POST(req: Request) {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
 
+  // Detect video rotation once, cache in DB metadata (same as Type 2 pipeline)
+  const existingMeta = (video.metadata ?? {}) as Record<string, unknown>;
+  const videoRotation = (existingMeta.videoRotation as number | undefined) ?? 0;
+
   let submitted = 0;
 
   // Create PROCESSING clips and submit Shotstack trim renders
@@ -389,7 +356,8 @@ export async function POST(req: Request) {
         video.storagePath,
         snappedStart,
         durationSec,
-        `${appUrl}/api/webhooks/shotstack?clipId=${clip.id}`
+        `${appUrl}/api/webhooks/shotstack?clipId=${clip.id}`,
+        videoRotation ?? 0,
       );
 
       await db.repurposedClip.update({

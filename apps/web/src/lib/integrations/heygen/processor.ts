@@ -2,7 +2,7 @@
 // Called via waitUntil after AssemblyAI webhook creates GENERATING_AI clips.
 
 import { db } from "@contentforge/db";
-import { generateAndUploadVoiceover, trimVideoWithShotstack, detectVideoRotation } from "@/lib/video-processing";
+import { generateAndUploadVoiceover, trimVideoWithShotstack } from "@/lib/video-processing";
 import { fetchMoodTrack } from "@/lib/integrations/pixabay/music";
 import { createLogger } from "../shared/logger";
 
@@ -94,21 +94,12 @@ export async function processAiClip(clipId: string): Promise<void> {
     // Music disabled temporarily — re-enable after e2e test passes
     // const musicUrl = await fetchMoodTrack(reelScript?.mood);
 
-    // Detect video rotation for phone recordings (Samsung/iPhone store portrait
-    // as landscape with a rotation tag — Shotstack ignores it without explicit correction).
-    // Cache in metadata.videoRotation so parallel clips only pay the cost once.
+    // Read cached rotation (set at process time in /process/route.ts).
+    // No detection here — avoids per-clip overhead; 0 means no correction needed.
     const existingMeta = (video.metadata as Record<string, unknown> | null) ?? {};
-    let rotationDeg: number;
-    if (typeof existingMeta.videoRotation === "number") {
-      rotationDeg = existingMeta.videoRotation;
-      logger.info("Using cached video rotation", { clipId, rotationDeg });
-    } else {
-      rotationDeg = await detectVideoRotation(video.storagePath);
-      logger.info("Detected video rotation", { clipId, rotationDeg });
-      await db.uploadedVideo.update({
-        where: { id: video.id },
-        data: { metadata: { ...existingMeta, videoRotation: rotationDeg } },
-      });
+    const rotationDeg = (existingMeta.videoRotation as number | undefined) ?? 0;
+    if (rotationDeg !== 0) {
+      logger.info("Applying cached video rotation", { clipId, rotationDeg });
     }
 
     const renderId = await trimVideoWithShotstack(
