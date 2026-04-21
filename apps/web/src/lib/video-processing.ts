@@ -178,22 +178,26 @@ export async function cloneVoiceFromVideo(
   const videoRes = await fetch(videoUrl);
   if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`);
 
-  const videoBuffer = await videoRes.arrayBuffer();
-  const fileSizeMB = videoBuffer.byteLength / 1024 / 1024;
+  // Use .blob() — in Node.js fetch, Blob serializes correctly in FormData
+  // without requiring a full ArrayBuffer copy. Then wrap in File so
+  // the multipart boundary includes the filename (required by ElevenLabs).
+  const videoBlob = await videoRes.blob();
+  const fileSizeMB = videoBlob.size / 1024 / 1024;
   console.log(`[clone-voice] Video size: ${fileSizeMB.toFixed(1)} MB`);
+
+  if (videoBlob.size === 0) {
+    throw new Error("Downloaded video blob is empty — R2 URL may be inaccessible");
+  }
+
+  const videoFile = new File([videoBlob], "voice_sample.mp4", { type: "video/mp4" });
 
   const form = new FormData();
   form.append("name", `Speaker-${videoId.slice(-8)}`);
   form.append("description", "Auto-cloned via ContentForge");
   form.append("remove_background_noise", "true");
-  // Always use .mp4 extension — ElevenLabs rejects .mpeg4, .mpeg, etc.
-  form.append(
-    "files",
-    new Blob([videoBuffer], { type: "video/mp4" }),
-    "video.mp4"
-  );
+  form.append("files", videoFile);
 
-  console.log(`[clone-voice] Submitting to ElevenLabs IVC...`);
+  console.log(`[clone-voice] Submitting ${fileSizeMB.toFixed(1)} MB to ElevenLabs IVC...`);
   const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
     method: "POST",
     headers: { "xi-api-key": apiKey },
