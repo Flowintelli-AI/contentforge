@@ -2,7 +2,7 @@
 // Called via waitUntil after AssemblyAI webhook creates GENERATING_AI clips.
 
 import { db } from "@contentforge/db";
-import { generateAndUploadVoiceover, trimVideoWithShotstack } from "@/lib/video-processing";
+import { generateAndUploadVoiceover, trimVideoWithShotstack, cloneVoiceFromVideo } from "@/lib/video-processing";
 import { fetchMoodTrack } from "@/lib/integrations/pixabay/music";
 import { createLogger } from "../shared/logger";
 
@@ -23,6 +23,7 @@ interface ReelScriptJson {
   originalEnd?: number;
   originalSrc?: string;
   originalWordTimings?: Array<{ word: string; start: number; end: number }>;
+  videoRotation?: number;
 }
 
 /**
@@ -45,7 +46,7 @@ export async function processAiClip(clipId: string): Promise<void> {
     return;
   }
 
-  const video = await db.uploadedVideo.findUnique({ where: { id: clip.videoId } });
+  let video = await db.uploadedVideo.findUnique({ where: { id: clip.videoId } });
   if (!video) {
     logger.warn("Parent video not found", { clipId, videoId: clip.videoId });
     await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
@@ -63,6 +64,19 @@ export async function processAiClip(clipId: string): Promise<void> {
       logger.error("Hybrid clip missing hookText", { clipId });
       await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
       return;
+    }
+
+    // If voice clone hasn't finished yet (race with AssemblyAI webhook), clone inline now.
+    if (!video.clonedVoiceId) {
+      logger.info("clonedVoiceId null — cloning voice inline before hook TTS", { clipId, videoId: video.id });
+      try {
+        const newVoiceId = await cloneVoiceFromVideo(video.storagePath, video.id);
+        await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } });
+        video = { ...video, clonedVoiceId: newVoiceId };
+        logger.info("Inline voice clone succeeded", { clipId, voiceId: newVoiceId });
+      } catch (cloneErr) {
+        logger.warn("Inline voice clone failed, will use fallback voice", { clipId, cloneErr });
+      }
     }
 
     const voiceId = video.clonedVoiceId ?? process.env.ELEVENLABS_VOICE_ID;
@@ -132,6 +146,19 @@ export async function processAiClip(clipId: string): Promise<void> {
     logger.error("No suggestedScript in reelScript — cannot generate voiceover", { clipId });
     await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
     return;
+  }
+
+  // If voice clone hasn't finished yet (race with AssemblyAI webhook), clone inline now.
+  if (!video.clonedVoiceId) {
+    logger.info("clonedVoiceId null — cloning voice inline before Type 2 TTS", { clipId, videoId: video.id });
+    try {
+      const newVoiceId = await cloneVoiceFromVideo(video.storagePath, video.id);
+      await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } });
+      video = { ...video, clonedVoiceId: newVoiceId };
+      logger.info("Inline voice clone succeeded", { clipId, voiceId: newVoiceId });
+    } catch (cloneErr) {
+      logger.warn("Inline voice clone failed, will use fallback voice", { clipId, cloneErr });
+    }
   }
 
   const voiceId = video.clonedVoiceId ?? process.env.ELEVENLABS_VOICE_ID;

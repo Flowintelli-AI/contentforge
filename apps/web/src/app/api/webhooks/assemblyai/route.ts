@@ -416,6 +416,7 @@ export async function POST(req: Request) {
             originalWordTimings: clipWordTimings,
             mood: "motivational",
             frameworkName: fw.name,
+            videoRotation: ((video.metadata as Record<string, unknown>)?.videoRotation as number) ?? 0,
           },
           metadata: {},
           hashtags: [],
@@ -448,7 +449,7 @@ export async function POST(req: Request) {
       waitUntil(
         remotionRenderService
           .renderClipAndWait({
-            segments: [{ type: 'original', src: videoSrc, startFrom: snappedStart, duration: durationSec, offsetFrom: 0 }],
+            segments: [{ type: 'original', src: videoSrc, startFrom: snappedStart, duration: durationSec, offsetFrom: 0, rotation: ((video.metadata as Record<string, unknown>)?.videoRotation as number) ?? 0 }],
             wordTimings: clipWordTimings,
             captionStyle: 'KARAOKE',
             totalDurationSec: durationSec,

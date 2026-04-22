@@ -10,11 +10,11 @@
     "lambda:ls": "npx remotion lambda functions ls"
   },
   "dependencies": {
-    "remotion": "4.0.290",
-    "@remotion/lambda": "4.0.290",
-    "@remotion/player": "4.0.290",
-    "@remotion/bundler": "4.0.290",
-    "@remotion/cli": "4.0.290",
+    "remotion": "4.0.451",
+    "@remotion/lambda": "4.0.451",
+    "@remotion/player": "4.0.451",
+    "@remotion/bundler": "4.0.451",
+    "@remotion/cli": "4.0.451",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

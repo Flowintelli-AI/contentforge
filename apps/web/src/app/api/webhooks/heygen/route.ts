@@ -111,6 +111,7 @@ export async function POST(req: Request) {
         const originalStart = reelScriptData.originalStart as number ?? 0;
         const originalEnd = reelScriptData.originalEnd as number ?? 0;
         const originalSrc = reelScriptData.originalSrc as string;
+        const videoRotation = (reelScriptData.videoRotation as number | undefined) ?? 0;
         const hookDurationSec =
           hookWordTimings.length > 0 ? hookWordTimings[hookWordTimings.length - 1].end + 0.5 : 3;
         const originalDurationSec = Math.max(1, originalEnd - originalStart);
@@ -137,7 +138,7 @@ export async function POST(req: Request) {
             .renderClipAndWait({
               segments: [
                 { type: 'heygen', src: videoUrl, startFrom: 0, duration: hookDurationSec, offsetFrom: 0 },
-                { type: 'original', src: originalSrc, startFrom: originalStart, duration: originalDurationSec, offsetFrom: hookDurationSec },
+                { type: 'original', src: originalSrc, startFrom: originalStart, duration: originalDurationSec, offsetFrom: hookDurationSec, rotation: videoRotation },
               ],
               wordTimings: combinedWordTimings,
               captionStyle: 'KARAOKE',
