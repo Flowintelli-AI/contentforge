@@ -167,9 +167,14 @@ export async function GET(req: Request) {
 
   // ── transcription ───────────────────────────────────────────────────────────
   if (stage === "transcription") {
-    if (!videoId) return NextResponse.json({ error: "videoId required" }, { status: 400 });
-    const video = await fetchVideoRecord(videoId);
-    if (!video) return NextResponse.json({ error: "Video not found" }, { status: 404 });
+    const directUrl = url.searchParams.get("videoUrl") ?? "";
+    if (!directUrl && !videoId) return NextResponse.json({ error: "videoId or videoUrl required" }, { status: 400 });
+    let audioUrl = directUrl;
+    if (!directUrl) {
+      const video = await fetchVideoRecord(videoId);
+      if (!video) return NextResponse.json({ error: "Video not found" }, { status: 404 });
+      audioUrl = video.storagePath;
+    }
 
     const apiKey = process.env.ASSEMBLYAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "ASSEMBLYAI_API_KEY not set" }, { status: 500 });
@@ -179,7 +184,7 @@ export async function GET(req: Request) {
         method: "POST",
         headers: { authorization: apiKey, "content-type": "application/json" },
         body: JSON.stringify({
-          audio_url: video.storagePath,
+          audio_url: audioUrl,
           speech_models: ["universal-2"],
           punctuate: true,
           format_text: true,
@@ -196,7 +201,7 @@ export async function GET(req: Request) {
       return ok("transcription", {
         transcriptId: id,
         initialStatus: status,
-        videoUrl: video.storagePath,
+        videoUrl: audioUrl,
         pollUrl: `https://api.assemblyai.com/v2/transcript/${id}`,
         note: "Transcription is async — check AssemblyAI dashboard or poll the URL above. Usually takes 2-5 min.",
       });
@@ -207,9 +212,14 @@ export async function GET(req: Request) {
 
   // ── shotstack ───────────────────────────────────────────────────────────────
   if (stage === "shotstack") {
-    if (!videoId) return NextResponse.json({ error: "videoId required" }, { status: 400 });
-    const video = await fetchVideoRecord(videoId);
-    if (!video) return NextResponse.json({ error: "Video not found" }, { status: 404 });
+    const directUrl = url.searchParams.get("videoUrl") ?? "";
+    if (!directUrl && !videoId) return NextResponse.json({ error: "videoId or videoUrl required" }, { status: 400 });
+    let srcUrl = directUrl;
+    if (!directUrl) {
+      const video = await fetchVideoRecord(videoId);
+      if (!video) return NextResponse.json({ error: "Video not found" }, { status: 404 });
+      srcUrl = video.storagePath;
+    }
 
     const apiKey = process.env.SHOTSTACK_API_KEY;
     const env = process.env.SHOTSTACK_ENV ?? "stage";
@@ -224,7 +234,7 @@ export async function GET(req: Request) {
         timeline: {
           tracks: [{
             clips: [{
-              asset: { type: "video", src: video.storagePath, trim: startSec },
+              asset: { type: "video", src: srcUrl, trim: startSec },
               start: 0,
               length: endSec - startSec,
               ...(rotation !== 0 ? { transform: { rotate: { angle: rotation } } } : {}),
@@ -254,7 +264,7 @@ export async function GET(req: Request) {
       return ok("shotstack", {
         renderId: data.response.id,
         initialStatus: data.response.status,
-        videoUrl: video.storagePath,
+        videoUrl: srcUrl,
         params: { startSec, endSec, rotation },
         pollUrl: `https://api.shotstack.io/${env}/render/${data.response.id}`,
         note: "Render is async — check Shotstack dashboard or poll the URL above.",
