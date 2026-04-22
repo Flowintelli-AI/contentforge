@@ -29,7 +29,7 @@ import { heyGenService } from "@/lib/integrations/heygen/service";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { renderMediaOnLambda, getRenderProgress } from "@remotion/lambda/client";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // ─── Auth guard ───────────────────────────────────────────────────────────────
 
@@ -612,8 +612,13 @@ export async function GET(req: Request) {
           console.log(`[test/heygen-simulate] Clip ${clipId} → READY: ${outputUrl}`);
         })
         .catch(async (err) => {
-          console.error(`[test/heygen-simulate] Render failed for clip ${clipId}:`, err);
-          await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`[test/heygen-simulate] Render failed for clip ${clipId}:`, errMsg);
+          const existingMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
+          await db.repurposedClip.update({
+            where: { id: clipId },
+            data: { status: "FAILED", metadata: { ...existingMeta, renderError: errMsg } },
+          });
         })
     );
 

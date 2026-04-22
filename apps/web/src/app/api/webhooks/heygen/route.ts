@@ -152,13 +152,12 @@ export async function POST(req: Request) {
               logger.info("Hybrid clip ready", { clipId: lipsyncClip.id, outputUrl });
             })
             .catch(async (err) => {
-              logger.error("Remotion render failed for hybrid clip", {
-                clipId: lipsyncClip.id,
-                error: err instanceof Error ? err.message : String(err),
-              });
+              const errMsg = err instanceof Error ? err.message : String(err);
+              logger.error("Remotion render failed for hybrid clip", { clipId: lipsyncClip.id, error: errMsg });
+              const meta = (lipsyncClip.metadata as Record<string, unknown> | null) ?? {};
               await db.repurposedClip.update({
                 where: { id: lipsyncClip.id },
-                data: { status: 'FAILED' },
+                data: { status: 'FAILED', metadata: { ...meta, heygenVideoUrl: videoUrl, renderError: errMsg } },
               });
             })
         );
@@ -189,13 +188,12 @@ export async function POST(req: Request) {
             logger.info("Type 2 clip ready", { clipId: lipsyncClip.id, outputUrl });
           })
           .catch(async (err) => {
-            logger.error("Remotion render failed for lipsync clip", {
-              clipId: lipsyncClip.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error("Remotion render failed for lipsync clip", { clipId: lipsyncClip.id, error: errMsg });
+            const meta = (lipsyncClip.metadata as Record<string, unknown> | null) ?? {};
             await db.repurposedClip.update({
               where: { id: lipsyncClip.id },
-              data: { status: 'FAILED' },
+              data: { status: 'FAILED', metadata: { ...meta, heygenVideoUrl: videoUrl, renderError: errMsg } },
             });
           })
       );
