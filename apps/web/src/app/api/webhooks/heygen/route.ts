@@ -3,9 +3,12 @@
 // Configure callback URL in HeyGen account settings: <APP_URL>/api/webhooks/heygen
 
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { db } from "@contentforge/db";
-import { reapService } from "@/lib/integrations/reap/service";
+import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
+
+export const maxDuration = 300;
 
 const logger = createLogger("heygen-webhook");
 
@@ -76,40 +79,44 @@ export async function POST(req: Request) {
         return NextResponse.json({ received: true });
       }
 
-      logger.info("Lipsync complete, submitting to Reap captions", {
+      const wordTimings =
+        ((lipsyncClip.metadata as Record<string, unknown> | null)?.wordTimings as
+          Array<{ word: string; start: number; end: number }>) ?? [];
+      const durationSec = lipsyncClip.duration ?? 30;
+
+      logger.info("Lipsync complete, queuing Remotion render", {
         clipId: lipsyncClip.id,
+        wordTimings: wordTimings.length,
+        durationSec,
         videoUrl,
       });
 
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-      try {
-        const projectId = await reapService.submitCaptions(videoUrl, {
-          captionsPreset: "karaoke-bold",
-          enableEmojis: true,
-          enableHighlights: true,
-          language: "en",
-          webhookUrl: appUrl
-            ? `${appUrl}/api/webhooks/reap?clipId=${lipsyncClip.id}`
-            : undefined,
-        });
-
-        await db.repurposedClip.update({
-          where: { id: lipsyncClip.id },
-          data: { opusClipId: `reap:${projectId}` },
-        });
-
-        logger.info("Submitted lipsync clip to Reap", { clipId: lipsyncClip.id, projectId });
-      } catch (err) {
-        logger.error("Reap submission failed for lipsync clip", {
-          clipId: lipsyncClip.id,
-          error: err instanceof Error ? err.message : String(err),
-          status: (err as any)?.status,
-        });
-        await db.repurposedClip.update({
-          where: { id: lipsyncClip.id },
-          data: { status: "FAILED" },
-        });
-      }
+      waitUntil(
+        remotionRenderService
+          .renderClipAndWait({
+            segments: [{ type: 'heygen', src: videoUrl, startFrom: 0, duration: durationSec, offsetFrom: 0 }],
+            wordTimings,
+            captionStyle: 'KARAOKE',
+            totalDurationSec: durationSec,
+          })
+          .then(async (outputUrl) => {
+            await db.repurposedClip.update({
+              where: { id: lipsyncClip.id },
+              data: { storagePath: outputUrl, status: 'READY' },
+            });
+            logger.info("Type 2 clip ready", { clipId: lipsyncClip.id, outputUrl });
+          })
+          .catch(async (err) => {
+            logger.error("Remotion render failed for lipsync clip", {
+              clipId: lipsyncClip.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            await db.repurposedClip.update({
+              where: { id: lipsyncClip.id },
+              data: { status: 'FAILED' },
+            });
+          })
+      );
 
       return NextResponse.json({ received: true });
     }

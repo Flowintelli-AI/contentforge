@@ -74,7 +74,15 @@ export async function processAiClip(clipId: string): Promise<void> {
       voiceId,
       `ai-clip-${clipId}`,
     );
-    logger.info("Voiceover ready", { clipId, audioUrl });
+    logger.info("Voiceover ready", { clipId, audioUrl, wordTimings: wordTimings.length });
+
+    // Persist word timings so the HeyGen webhook can pass them to Remotion for captions.
+    // ElevenLabs timings are already in seconds, relative to the TTS audio start — perfect for Remotion.
+    const existingClipMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
+    await db.repurposedClip.update({
+      where: { id: clipId },
+      data: { metadata: { ...existingClipMeta, wordTimings } },
+    });
 
     // 2. Trim video to exact audio duration so they end at the same time.
     // Shotstack accepts decimal seconds. HeyGen requires <15% duration diff — 0% is ideal.
@@ -112,7 +120,7 @@ export async function processAiClip(clipId: string): Promise<void> {
     logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration, mood: reelScript?.mood ?? "motivational" });
 
     // 4. Mark as PROCESSING — Shotstack webhook fires when trim is done,
-    //    then submits to HeyGen, then HeyGen webhook fires → Reap → READY
+    //    then submits to HeyGen, then HeyGen webhook fires → Remotion render → READY
     await db.repurposedClip.update({
       where: { id: clipId },
       data: {

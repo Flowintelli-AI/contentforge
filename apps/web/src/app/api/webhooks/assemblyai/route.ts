@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { waitUntil } from "@vercel/functions";
 import { processAiClip } from "@/lib/integrations/heygen/processor";
-import { trimVideoWithShotstack } from "@/lib/video-processing";
+import { remotionRenderService } from "@/lib/integrations/remotion/service";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -230,16 +230,6 @@ Return ONLY valid JSON, no markdown, no explanation:
   return result;
 }
 
-async function submitShotstackTrim(
-  videoUrl: string,
-  startSec: number,
-  durationSec: number,
-  callbackUrl: string,
-  rotationDeg: number = 0,
-): Promise<string> {
-  return trimVideoWithShotstack(videoUrl, durationSec, callbackUrl, undefined, rotationDeg, startSec);
-}
-
 export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
   const videoId = searchParams.get("videoId");
@@ -316,16 +306,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
-
   // Detect video rotation once, cache in DB metadata (same as Type 2 pipeline)
   const existingMeta = (video.metadata ?? {}) as Record<string, unknown>;
   const videoRotation = (existingMeta.videoRotation as number | undefined) ?? 0;
 
   let submitted = 0;
+  const type1RenderJobs: Array<{
+    clipId: string;
+    snappedStart: number;
+    durationSec: number;
+    wordTimings: Array<{ word: string; start: number; end: number }>;
+  }> = [];
 
-  // Create PROCESSING clips and submit Shotstack trim renders
+  // Create PROCESSING clips and queue Remotion renders for Type 1 clips
   for (const found of result.clips) {
     const fw = FRAMEWORKS.find((f) => f.id === found.framework);
     if (!fw) continue;
@@ -338,6 +331,15 @@ export async function POST(req: Request) {
     console.log(`[assemblyai] ${found.framework} raw=${found.start}s-${found.end}s → snapped=${snappedStart.toFixed(2)}s-${snappedEnd.toFixed(2)}s (${durationSec.toFixed(2)}s)`);
 
     try {
+      // Convert AssemblyAI word timings (ms, absolute) → Remotion format (seconds, clip-relative)
+      const clipWordTimings = (transcript.words ?? [])
+        .filter(w => w.start / 1000 >= snappedStart - 0.05 && w.end / 1000 <= snappedEnd + 0.35)
+        .map(w => ({
+          word: w.text,
+          start: parseFloat((w.start / 1000 - snappedStart).toFixed(3)),
+          end: parseFloat((w.end / 1000 - snappedStart).toFixed(3)),
+        }));
+
       const clip = await db.repurposedClip.create({
         data: {
           videoId,
@@ -352,21 +354,15 @@ export async function POST(req: Request) {
         },
       });
 
-      const renderId = await submitShotstackTrim(
-        video.storagePath,
+      type1RenderJobs.push({
+        clipId: clip.id,
         snappedStart,
         durationSec,
-        `${appUrl}/api/webhooks/shotstack?clipId=${clip.id}`,
-        videoRotation ?? 0,
-      );
-
-      await db.repurposedClip.update({
-        where: { id: clip.id },
-        data: { opusClipId: renderId },
+        wordTimings: clipWordTimings,
       });
 
       console.log(
-        `[assemblyai] clip=${clip.id} framework=${found.framework} platform=${fw.platform} score=${found.score} → Shotstack renderId=${renderId}`
+        `[assemblyai] clip=${clip.id} framework=${found.framework} platform=${fw.platform} score=${found.score} words=${clipWordTimings.length} → queued for Remotion`
       );
       submitted++;
     } catch (err) {
@@ -374,6 +370,36 @@ export async function POST(req: Request) {
         `[assemblyai] failed to submit ${found.framework} clip for video=${videoId}:`, err
       );
     }
+  }
+
+  // Kick off Remotion renders for all Type 1 clips in parallel (background)
+  if (type1RenderJobs.length > 0) {
+    const videoSrc = video.storagePath;
+    waitUntil(
+      Promise.all(
+        type1RenderJobs.map(async (job) => {
+          try {
+            const outputUrl = await remotionRenderService.renderClipAndWait({
+              segments: [{ type: 'original', src: videoSrc, startFrom: job.snappedStart, duration: job.durationSec, offsetFrom: 0 }],
+              wordTimings: job.wordTimings,
+              captionStyle: 'KARAOKE',
+              totalDurationSec: job.durationSec,
+            });
+            await db.repurposedClip.update({
+              where: { id: job.clipId },
+              data: { storagePath: outputUrl, status: 'READY' },
+            });
+            console.log(`[assemblyai] Type 1 clip ready: clipId=${job.clipId} url=${outputUrl}`);
+          } catch (err) {
+            console.error(`[assemblyai] Remotion render failed: clipId=${job.clipId}`, err);
+            await db.repurposedClip.update({
+              where: { id: job.clipId },
+              data: { status: 'FAILED' },
+            });
+          }
+        })
+      )
+    );
   }
 
   // Create GENERATING_AI clips for missing frameworks — AI fill pipeline handles the rest
@@ -443,7 +469,7 @@ export async function POST(req: Request) {
   );
 
   console.log(
-    `[assemblyai] video=${videoId}: ${submitted} Shotstack renders submitted, ${aiQueued} AI fill clips queued`
+    `[assemblyai] video=${videoId}: ${submitted} Remotion renders queued, ${aiQueued} AI fill clips queued`
   );
   return NextResponse.json({ ok: true, submitted, aiQueued });
 }

@@ -1,0 +1,26 @@
+{
+  "name": "@contentforge/remotion",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "render:local": "npx remotion render",
+    "lambda:deploy": "npx remotion lambda functions deploy",
+    "lambda:deploy-site": "npx remotion lambda sites create --site-name=contentforge",
+    "lambda:ls": "npx remotion lambda functions ls"
+  },
+  "dependencies": {
+    "remotion": "4.0.290",
+    "@remotion/lambda": "4.0.290",
+    "@remotion/player": "4.0.290",
+    "@remotion/bundler": "4.0.290",
+    "@remotion/cli": "4.0.290",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.4.0"
+  }
+}
