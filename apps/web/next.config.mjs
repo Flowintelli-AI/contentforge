@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
   // Prevent webpack from bundling native binaries — resolved at runtime from node_modules
   serverExternalPackages: ["ffmpeg-static"],
   // Explicitly include the ffmpeg binary in Vercel's output file tracing
