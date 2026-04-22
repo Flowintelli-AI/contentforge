@@ -87,6 +87,9 @@ class RemotionRenderService {
       maxRetries: 1,
       privacy: 'public',
       frameRange: [0, totalFrames - 1],
+      // Limit parallel Lambda invocations to stay within AWS concurrency quota.
+      // At 200 frames/Lambda: a 60s clip (1800 frames) uses ~9 concurrent functions.
+      framesPerLambda: 200,
     });
 
     const bucket = renderBucket ?? this.bucketName;

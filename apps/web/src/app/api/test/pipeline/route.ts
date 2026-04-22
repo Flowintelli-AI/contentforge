@@ -424,6 +424,7 @@ export async function GET(req: Request) {
         maxRetries: 1,
         privacy: "public",
         frameRange: [0, totalFrames - 1],
+        framesPerLambda: 200,
       });
 
       const bucket = renderBucket ?? bucketName;
