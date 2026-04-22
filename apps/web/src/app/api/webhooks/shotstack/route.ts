@@ -2,6 +2,31 @@ import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
 import { reapService } from "@/lib/integrations/reap/service";
 import { heyGenService } from "@/lib/integrations/heygen/service";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+
+const r2 = new S3Client({
+  region: "auto",
+  endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  },
+});
+
+/** Re-host a Shotstack stage video on R2 so external services (HeyGen) can download it. */
+async function reuploadFaceVideoToR2(shotstackUrl: string, clipId: string): Promise<string> {
+  const res = await fetch(shotstackUrl);
+  if (!res.ok) throw new Error(`Failed to download Shotstack video (${res.status}): ${shotstackUrl}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const key = `heygen-face/${clipId}.mp4`;
+  await r2.send(new PutObjectCommand({
+    Bucket: "contentforge-videos",
+    Key: key,
+    Body: buffer,
+    ContentType: "video/mp4",
+  }));
+  return `${process.env.R2_PUBLIC_URL}/${key}`;
+}
 
 interface ShotstackCallback {
   id: string;
@@ -59,8 +84,13 @@ export async function POST(req: Request) {
     console.log(`[shotstack] trimmedVideo=${body.url} audio=${decodedAudioUrl}`);
 
     try {
+      // Re-upload to R2 so HeyGen can download it (Shotstack stage S3 is not externally accessible)
+      console.log(`[shotstack] re-uploading face video to R2 clip=${clip.id}`);
+      const publicFaceUrl = await reuploadFaceVideoToR2(body.url, clip.id);
+      console.log(`[shotstack] face video at R2: ${publicFaceUrl}`);
+
       const { lipsyncId } = await heyGenService.submitLipsync({
-        faceVideoUrl: body.url, // short trimmed clip (10-20s) — fits in $5 budget
+        faceVideoUrl: publicFaceUrl,
         audioUrl: decodedAudioUrl,
         title: clip.title ?? undefined,
         callbackUrl: `${appUrl}/api/webhooks/heygen`,
