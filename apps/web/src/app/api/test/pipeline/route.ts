@@ -353,6 +353,18 @@ export async function GET(req: Request) {
     }
   }
 
+  // ── heygen-status — check status of an existing lipsync job ─────────────────
+  if (stage === "heygen-status") {
+    const lipsyncId = url.searchParams.get("lipsyncId") ?? "";
+    if (!lipsyncId) return NextResponse.json({ error: "lipsyncId param required" }, { status: 400 });
+    try {
+      const status = await heyGenService.getLipsyncStatus(lipsyncId);
+      return ok("heygen-status", status);
+    } catch (err) {
+      return fail("heygen-status", err);
+    }
+  }
+
   // ── db-clip ─────────────────────────────────────────────────────────────────
   if (stage === "db-clip") {
     const clipId = url.searchParams.get("clipId") ?? "";
