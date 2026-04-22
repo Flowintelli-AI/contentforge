@@ -353,13 +353,18 @@ export async function GET(req: Request) {
     }
   }
 
-  // ── heygen-status — check status of an existing lipsync job ─────────────────
+  // ── heygen-status — check status of an existing lipsync job (raw API) ────────
   if (stage === "heygen-status") {
     const lipsyncId = url.searchParams.get("lipsyncId") ?? "";
     if (!lipsyncId) return NextResponse.json({ error: "lipsyncId param required" }, { status: 400 });
     try {
-      const status = await heyGenService.getLipsyncStatus(lipsyncId);
-      return ok("heygen-status", status);
+      const apiKey = process.env.HEYGEN_API_KEY ?? "";
+      if (!apiKey) return NextResponse.json({ error: "HEYGEN_API_KEY not set" }, { status: 500 });
+      const res = await fetch(`https://api.heygen.com/v3/lipsyncs/${lipsyncId}`, {
+        headers: { "X-Api-Key": apiKey },
+      });
+      const raw = await res.json();
+      return ok("heygen-status", { httpStatus: res.status, raw });
     } catch (err) {
       return fail("heygen-status", err);
     }
