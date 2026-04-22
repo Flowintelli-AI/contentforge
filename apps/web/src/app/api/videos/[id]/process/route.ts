@@ -131,7 +131,8 @@ async function performVoiceClone(
     form.append("remove_background_noise", "true");
     // Pass the public R2 URL directly — ElevenLabs fetches the complete file,
     // avoiding the corrupted-container problem from byte-range slicing.
-    form.append("files_url", storagePath);
+    // files_url must be a JSON array per ElevenLabs IVC API spec.
+    form.append("files_url", JSON.stringify([storagePath]));
 
     const cloneRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
       method: "POST",

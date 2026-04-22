@@ -82,7 +82,20 @@ export async function POST(req: Request) {
       const wordTimings =
         ((lipsyncClip.metadata as Record<string, unknown> | null)?.wordTimings as
           Array<{ word: string; start: number; end: number }>) ?? [];
-      const durationSec = lipsyncClip.duration ?? 30;
+      const durationFromWords =
+        wordTimings.length > 0
+          ? wordTimings[wordTimings.length - 1].end + 0.5 // 0.5s padding after last word
+          : null;
+      // Word timings reflect actual TTS audio length — always prefer over the DB
+      // duration field (which comes from the original source clip, not the TTS output).
+      const durationSec = durationFromWords ?? lipsyncClip.duration ?? 30;
+
+      // Store the HeyGen video URL so we can re-render without calling HeyGen API again.
+      const existingMeta = (lipsyncClip.metadata as Record<string, unknown> | null) ?? {};
+      await db.repurposedClip.update({
+        where: { id: lipsyncClip.id },
+        data: { metadata: { ...existingMeta, heygenVideoUrl: videoUrl } },
+      });
 
       logger.info("Lipsync complete, queuing Remotion render", {
         clipId: lipsyncClip.id,

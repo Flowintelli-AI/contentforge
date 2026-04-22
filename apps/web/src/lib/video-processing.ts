@@ -930,7 +930,12 @@ export async function trimVideoWithShotstack(
     asset: { type: "video", src: videoUrl, trim: startTrimSec, volume: 1.0 },
     start: 0,
     length: durationSec,
-    fit: "cover",
+    // For rotated clips (e.g. Samsung/Android portrait stored as landscape 1920×1080):
+    // Shotstack applies fit BEFORE the rotation transform, so "cover" tries to fill
+    // the portrait canvas with the landscape source — heavily cropping and distorting.
+    // After a 90° rotation a 1920×1080 clip naturally fills a 1080×1920 canvas exactly,
+    // so no fit scaling is needed. For non-rotated videos keep "cover" as before.
+    ...(rotationDeg === 0 && { fit: "cover" }),
   };
   if (rotationDeg !== 0) {
     videoClip.transform = { rotate: { angle: rotationDeg } };

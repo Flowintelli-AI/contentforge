@@ -510,6 +510,68 @@ export async function GET(req: Request) {
     }
   }
 
+  // ── rerender-clip — re-render a clip using stored HeyGen URL + word timings ──
+  // Useful to re-render clips that were rendered with wrong duration.
+  if (stage === "rerender-clip") {
+    const clipId = url.searchParams.get("clipId") ?? "";
+    if (!clipId) {
+      return NextResponse.json({ error: "clipId param required" }, { status: 400 });
+    }
+
+    const clip = await db.repurposedClip.findUnique({ where: { id: clipId } });
+    if (!clip) return NextResponse.json({ error: "Clip not found" }, { status: 404 });
+
+    const meta = (clip.metadata as Record<string, unknown> | null) ?? {};
+    const heygenVideoUrl = meta.heygenVideoUrl as string | undefined;
+    if (!heygenVideoUrl) {
+      return NextResponse.json({
+        error: "No heygenVideoUrl stored in clip metadata. The clip was rendered before this was tracked. Pass heygenVideoUrl manually using heygen-simulate instead.",
+        clipId,
+        meta,
+      }, { status: 400 });
+    }
+
+    const wordTimings =
+      (meta.wordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
+    const durationFromWords =
+      wordTimings.length > 0
+        ? wordTimings[wordTimings.length - 1].end + 0.5
+        : null;
+    const durationSec = durationFromWords ?? clip.duration ?? 30;
+
+    await db.repurposedClip.update({ where: { id: clipId }, data: { status: "PROCESSING" } });
+
+    waitUntil(
+      remotionRenderService
+        .renderClipAndWait({
+          segments: [{ type: "heygen", src: heygenVideoUrl, startFrom: 0, duration: durationSec, offsetFrom: 0 }],
+          wordTimings,
+          captionStyle: "KARAOKE",
+          totalDurationSec: durationSec,
+        })
+        .then(async (outputUrl) => {
+          await db.repurposedClip.update({
+            where: { id: clipId },
+            data: { storagePath: outputUrl, status: "READY" },
+          });
+          console.log(`[test/rerender-clip] Clip ${clipId} → READY: ${outputUrl}`);
+        })
+        .catch(async (err) => {
+          console.error(`[test/rerender-clip] Render failed for clip ${clipId}:`, err);
+          await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+        })
+    );
+
+    return ok("rerender-clip", {
+      clipId,
+      heygenVideoUrl,
+      durationSec,
+      durationSource: durationFromWords ? "word-timings" : "db-duration",
+      wordTimingCount: wordTimings.length,
+      message: `Re-render queued ✅ — poll with: stage=db-clip&clipId=${clipId}`,
+    });
+  }
+
   // ── heygen-simulate — fire Remotion render for a lipsync clip ────────────────
   // Simulates the HeyGen webhook success event without waiting for HeyGen.
   // Requires clip to exist in DB with wordTimings in metadata (set by heygen/processor.ts).
@@ -530,7 +592,9 @@ export async function GET(req: Request) {
     const wordTimings =
       ((clip.metadata as Record<string, unknown> | null)?.wordTimings as
         Array<{ word: string; start: number; end: number }>) ?? [];
-    const durationSec = clip.duration ?? 30;
+    const durationFromWords =
+      wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].end + 0.5 : null;
+    const durationSec = durationFromWords ?? clip.duration ?? 30;
 
     waitUntil(
       remotionRenderService
@@ -575,6 +639,7 @@ export async function GET(req: Request) {
       "transcription    — submit video to AssemblyAI (async) [?videoId=]",
       "remotion         — submit a test Remotion render (returns renderId) [?videoUrl=...&durationSec=5&captionStyle=KARAOKE]",
       "remotion-poll    — check Remotion render progress [?renderId=...&bucket=...]",
+      "rerender-clip    — re-render a clip with correct duration from word timings [?clipId=]",
       "heygen-simulate  — simulate HeyGen webhook → triggers Remotion render for clip [?clipId=...&heygenVideoUrl=...]",
       "shotstack        — submit a Shotstack trim render [?start=0&end=10&rotation=0]",
       "shotstack-poll   — check Shotstack render status [?renderId=...]",

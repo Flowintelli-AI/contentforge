@@ -93,8 +93,9 @@ const KaraokeCaption: React.FC<{
           display: 'flex',
           flexWrap: 'wrap',
           justifyContent: 'center',
-          gap: 8,
+          gap: 12,
           maxWidth: '85%',
+          rowGap: 4,
         }}
       >
         {visible.map((w, i) => {
@@ -104,13 +105,14 @@ const KaraokeCaption: React.FC<{
               key={`${w.word}-${start + i}`}
               style={{
                 fontFamily: 'Inter, Arial Black, sans-serif',
-                fontSize: 52,
+                fontSize: isActive ? 60 : 52,
                 fontWeight: isActive ? 900 : 700,
                 color: isActive ? highlightColor : primaryColor,
-                textShadow: '0 2px 12px rgba(0,0,0,0.8)',
-                transform: isActive ? 'scale(1.15)' : 'scale(1)',
-                transition: 'transform 0.05s',
+                textShadow: isActive
+                  ? '0 2px 16px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.6)'
+                  : '0 2px 12px rgba(0,0,0,0.8)',
                 letterSpacing: -1,
+                lineHeight: 1.2,
               }}
             >
               {w.word}

@@ -35,11 +35,20 @@ export const VideoComposition: React.FC<VideoCompositionProps> = ({
 
         return (
           <Sequence key={i} from={fromFrame} durationInFrames={durationFrames}>
-            <AbsoluteFill>
+            <AbsoluteFill style={{ overflow: 'hidden' }}>
               <OffthreadVideo
                 src={seg.src}
                 startFrom={startFromFrame}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  objectPosition: 'center center',
+                }}
               />
             </AbsoluteFill>
           </Sequence>

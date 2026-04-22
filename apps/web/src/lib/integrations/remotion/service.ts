@@ -84,6 +84,7 @@ class RemotionRenderService {
       },
       codec: 'h264',
       imageFormat: 'jpeg',
+      jpegQuality: 90,
       maxRetries: 1,
       privacy: 'public',
       frameRange: [0, totalFrames - 1],
