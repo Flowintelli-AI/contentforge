@@ -627,24 +627,170 @@ export async function GET(req: Request) {
     });
   }
 
+  // ── hook-tts — test ElevenLabs TTS with a hook string ──────────────────────
+  // Generates audio for a hook phrase using the cloned voice (or default voice).
+  // Returns the audio URL and word timings — no DB writes, no HeyGen calls.
+  if (stage === "hook-tts") {
+    const hookText = url.searchParams.get("hookText") ?? "";
+    if (!hookText) {
+      return NextResponse.json({
+        error: "hookText param required",
+        example: "?stage=hook-tts&hookText=Nobody+mentions+this",
+        availableHooks: [
+          "Nobody mentions this",
+          "I wish I knew this earlier",
+          "Pause for a second",
+          "Ever notice this pattern",
+          "Here's the real truth",
+          "Let me save you hours",
+          "This may surprise you",
+          "You need this now",
+          "You may not agree with this",
+          "I just figured this out",
+        ],
+      }, { status: 400 });
+    }
+
+    const voiceId = url.searchParams.get("voiceId") ?? process.env.ELEVENLABS_VOICE_ID ?? "";
+    if (!voiceId) {
+      return NextResponse.json({ error: "voiceId param required (or set ELEVENLABS_VOICE_ID env var)" }, { status: 400 });
+    }
+
+    try {
+      const { url: audioUrl, wordTimings } = await generateAndUploadVoiceover(
+        hookText,
+        voiceId,
+        `hook-test-${Date.now()}`,
+      );
+      const hookDurationSec = wordTimings.length > 0
+        ? wordTimings[wordTimings.length - 1].end + 0.5
+        : null;
+      return ok("hook-tts", {
+        hookText,
+        voiceId,
+        audioUrl,
+        wordTimingCount: wordTimings.length,
+        hookDurationSec,
+        wordTimings,
+        message: "✅ Hook TTS generated. Use audioUrl + a face video to test HeyGen lipsync.",
+      });
+    } catch (err) {
+      return fail("hook-tts", err);
+    }
+  }
+
+  // ── hybrid-render-simulate — test 2-segment Remotion render (hook + original) ─
+  // Simulates the hybrid HeyGen webhook path without running the full pipeline.
+  // Requires a clip that has isHybridWithOriginal in reelScript and hookWordTimings in metadata.
+  // Pass heygenVideoUrl = the hook face video URL from HeyGen (or any short face video for testing).
+  if (stage === "hybrid-render-simulate") {
+    const clipId = url.searchParams.get("clipId") ?? "";
+    const heygenVideoUrl = url.searchParams.get("heygenVideoUrl") ?? "";
+
+    if (!clipId || !heygenVideoUrl) {
+      return NextResponse.json({
+        error: "clipId and heygenVideoUrl params required",
+        example: "?stage=hybrid-render-simulate&clipId=<id>&heygenVideoUrl=https://...mp4",
+        note: "Clip must have isHybridWithOriginal:true in reelScript + hookWordTimings in metadata",
+      }, { status: 400 });
+    }
+
+    const clip = await db.repurposedClip.findUnique({ where: { id: clipId } });
+    if (!clip) return NextResponse.json({ error: "Clip not found" }, { status: 404 });
+
+    const reelScriptData = (clip.reelScript as Record<string, unknown> | null) ?? {};
+    if (!reelScriptData.isHybridWithOriginal) {
+      return NextResponse.json({
+        error: "Clip is not a hybrid clip (missing isHybridWithOriginal:true in reelScript)",
+        reelScript: reelScriptData,
+      }, { status: 400 });
+    }
+
+    const meta = (clip.metadata as Record<string, unknown> | null) ?? {};
+    const hookWordTimings = (meta.hookWordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
+    const originalWordTimings = (reelScriptData.originalWordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
+    const originalStart = reelScriptData.originalStart as number ?? 0;
+    const originalEnd = reelScriptData.originalEnd as number ?? 0;
+    const originalSrc = reelScriptData.originalSrc as string;
+
+    if (!originalSrc) {
+      return NextResponse.json({ error: "reelScript.originalSrc is missing" }, { status: 400 });
+    }
+
+    const hookDurationSec = hookWordTimings.length > 0
+      ? hookWordTimings[hookWordTimings.length - 1].end + 0.5
+      : 3;
+    const originalDurationSec = Math.max(1, originalEnd - originalStart);
+    const totalDurationSec = hookDurationSec + originalDurationSec;
+
+    const offsetOriginalTimings = originalWordTimings.map((w) => ({
+      ...w,
+      start: parseFloat((w.start + hookDurationSec).toFixed(3)),
+      end: parseFloat((w.end + hookDurationSec).toFixed(3)),
+    }));
+    const combinedWordTimings = [...hookWordTimings, ...offsetOriginalTimings];
+
+    await db.repurposedClip.update({ where: { id: clipId }, data: { status: "PROCESSING" } });
+
+    waitUntil(
+      remotionRenderService
+        .renderClipAndWait({
+          segments: [
+            { type: "heygen", src: heygenVideoUrl, startFrom: 0, duration: hookDurationSec, offsetFrom: 0 },
+            { type: "original", src: originalSrc, startFrom: originalStart, duration: originalDurationSec, offsetFrom: hookDurationSec },
+          ],
+          wordTimings: combinedWordTimings,
+          captionStyle: "KARAOKE",
+          totalDurationSec,
+        })
+        .then(async (outputUrl) => {
+          await db.repurposedClip.update({
+            where: { id: clipId },
+            data: { storagePath: outputUrl, status: "READY" },
+          });
+          console.log(`[test/hybrid-render-simulate] Clip ${clipId} → READY: ${outputUrl}`);
+        })
+        .catch(async (err) => {
+          console.error(`[test/hybrid-render-simulate] Render failed for clip ${clipId}:`, err);
+          await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+        })
+    );
+
+    return ok("hybrid-render-simulate", {
+      clipId,
+      heygenVideoUrl,
+      hookDurationSec,
+      originalStart,
+      originalEnd,
+      originalDurationSec,
+      totalDurationSec,
+      hookWords: hookWordTimings.length,
+      originalWords: originalWordTimings.length,
+      combinedWords: combinedWordTimings.length,
+      message: `✅ 2-segment Remotion render queued — poll with: stage=db-clip&clipId=${clipId}`,
+    });
+  }
+
   // ── unknown stage ───────────────────────────────────────────────────────────
   return NextResponse.json({
     error: `Unknown stage: "${stage}"`,
     availableStages: [
-      "db-video         — inspect DB video record + clips (no external calls) [?videoId=]",
-      "db-clip          — inspect a single clip (status, wordTimings, storagePath) [?clipId=]",
-      "rotation         — detect rotation angle from video [?videoId=]",
-      "voice-clone      — clone voice via ElevenLabs ⚠️ creates real voice [?videoId=]",
-      "tts              — generate TTS audio [?voiceId=...&script=...]",
-      "transcription    — submit video to AssemblyAI (async) [?videoId=]",
-      "remotion         — submit a test Remotion render (returns renderId) [?videoUrl=...&durationSec=5&captionStyle=KARAOKE]",
-      "remotion-poll    — check Remotion render progress [?renderId=...&bucket=...]",
-      "rerender-clip    — re-render a clip with correct duration from word timings [?clipId=]",
-      "heygen-simulate  — simulate HeyGen webhook → triggers Remotion render for clip [?clipId=...&heygenVideoUrl=...]",
-      "shotstack        — submit a Shotstack trim render [?start=0&end=10&rotation=0]",
-      "shotstack-poll   — check Shotstack render status [?renderId=...]",
-      "reap             — submit captions to Reap [?videoUrl=...]",
-      "heygen           — submit lipsync to HeyGen ⚠️ costs credits [?faceVideoUrl=...&audioUrl=...]",
+      "db-video                — inspect DB video record + clips (no external calls) [?videoId=]",
+      "db-clip                 — inspect a single clip (status, wordTimings, storagePath) [?clipId=]",
+      "rotation                — detect rotation angle from video [?videoId=]",
+      "voice-clone             — clone voice via ElevenLabs ⚠️ creates real voice [?videoId=]",
+      "tts                     — generate TTS audio [?voiceId=...&script=...]",
+      "hook-tts                — test hook phrase TTS (no HeyGen, no DB) [?hookText=...&voiceId=...]",
+      "transcription           — submit video to AssemblyAI (async) [?videoId=]",
+      "remotion                — submit a test Remotion render (returns renderId) [?videoUrl=...&durationSec=5]",
+      "remotion-poll           — check Remotion render progress [?renderId=...&bucket=...]",
+      "rerender-clip           — re-render a clip with correct duration from word timings [?clipId=]",
+      "heygen-simulate         — simulate HeyGen webhook → triggers Remotion render [?clipId=...&heygenVideoUrl=...]",
+      "hybrid-render-simulate  — test 2-segment Remotion render (hook face + original footage) [?clipId=...&heygenVideoUrl=...]",
+      "shotstack               — submit a Shotstack trim render [?start=0&end=10&rotation=0]",
+      "shotstack-poll          — check Shotstack render status [?renderId=...]",
+      "reap                    — submit captions to Reap [?videoUrl=...]",
+      "heygen                  — submit lipsync to HeyGen ⚠️ costs credits [?faceVideoUrl=...&audioUrl=...]",
     ],
     usage: "GET /api/test/pipeline?secret=<TEST_SECRET>&stage=<stage>",
   }, { status: 400 });
