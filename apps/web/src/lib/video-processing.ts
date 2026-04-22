@@ -174,46 +174,60 @@ export async function cloneVoiceFromVideo(
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY is not set");
 
-  console.log(`[clone-voice] Downloading video for ${videoId}...`);
-  const videoRes = await fetch(videoUrl);
-  if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`);
+  // ElevenLabs IVC rejects files > 11 MB. Full phone videos are typically 30-100 MB.
+  // Fix: use ffmpeg to extract the first 30 s of audio as MP3 (~480 KB) and send that.
+  const bin = await resolveFfmpegBin();
+  const inputPath = path.join("/tmp", `${videoId}-voice-input.mp4`);
+  const audioPath = path.join("/tmp", `${videoId}-voice-sample.mp3`);
 
-  // Use .blob() — in Node.js fetch, Blob serializes correctly in FormData
-  // without requiring a full ArrayBuffer copy. Then wrap in File so
-  // the multipart boundary includes the filename (required by ElevenLabs).
-  const videoBlob = await videoRes.blob();
-  const fileSizeMB = videoBlob.size / 1024 / 1024;
-  console.log(`[clone-voice] Video size: ${fileSizeMB.toFixed(1)} MB`);
+  try {
+    console.log(`[clone-voice] Downloading video for ${videoId}...`);
+    const videoRes = await fetch(videoUrl);
+    if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`);
+    if (!videoRes.body) throw new Error("Video response has no body");
+    await pipeline(videoRes.body as unknown as NodeJS.ReadableStream, createWriteStream(inputPath));
 
-  if (videoBlob.size === 0) {
-    throw new Error("Downloaded video blob is empty — R2 URL may be inaccessible");
+    console.log(`[clone-voice] Extracting 30s audio sample with ffmpeg...`);
+    // -vn = no video, -t 30 = first 30 s, -q:a 4 = ~128kbps VBR MP3
+    await execFileAsync(bin, [
+      "-i", inputPath,
+      "-vn", "-t", "30", "-q:a", "4",
+      "-y", audioPath,
+    ]);
+
+    const { readFile } = await import("fs/promises");
+    const audioBuffer = await readFile(audioPath);
+    const audioSizeMB = audioBuffer.length / 1024 / 1024;
+    console.log(`[clone-voice] Audio sample size: ${audioSizeMB.toFixed(2)} MB`);
+
+    const audioFile = new File([audioBuffer], "voice_sample.mp3", { type: "audio/mpeg" });
+
+    const form = new FormData();
+    form.append("name", `Speaker-${videoId.slice(-8)}`);
+    form.append("description", "Auto-cloned via ContentForge");
+    form.append("remove_background_noise", "true");
+    form.append("files", audioFile);
+
+    console.log(`[clone-voice] Submitting ${audioSizeMB.toFixed(2)} MB to ElevenLabs IVC...`);
+    const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
+      method: "POST",
+      headers: { "xi-api-key": apiKey },
+      body: form,
+    });
+
+    const responseText = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        `ElevenLabs voice clone failed (${res.status}): ${responseText}`
+      );
+    }
+
+    const { voice_id } = JSON.parse(responseText) as { voice_id: string };
+    console.log(`[clone-voice] ✅ Voice cloned successfully: ${voice_id}`);
+    return voice_id;
+  } finally {
+    await Promise.allSettled([unlink(inputPath), unlink(audioPath)]);
   }
-
-  const videoFile = new File([videoBlob], "voice_sample.mp4", { type: "video/mp4" });
-
-  const form = new FormData();
-  form.append("name", `Speaker-${videoId.slice(-8)}`);
-  form.append("description", "Auto-cloned via ContentForge");
-  form.append("remove_background_noise", "true");
-  form.append("files", videoFile);
-
-  console.log(`[clone-voice] Submitting ${fileSizeMB.toFixed(1)} MB to ElevenLabs IVC...`);
-  const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-    method: "POST",
-    headers: { "xi-api-key": apiKey },
-    body: form,
-  });
-
-  const responseText = await res.text();
-  if (!res.ok) {
-    throw new Error(
-      `ElevenLabs voice clone failed (${res.status}): ${responseText}`
-    );
-  }
-
-  const { voice_id } = JSON.parse(responseText) as { voice_id: string };
-  console.log(`[clone-voice] ✅ Voice cloned successfully: ${voice_id}`);
-  return voice_id;
 }
 
 /**
