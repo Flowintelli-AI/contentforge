@@ -46,6 +46,20 @@ const FRAMEWORKS: FrameworkDef[] = [
   { id: "list_format",       platform: "YOUTUBE",   name: "List Format / Fast Value Stacking",          minSec: 15, maxSec: 30 },
 ];
 
+// The 10 approved viral hooks — GPT picks the best fit for each clip
+const VIRAL_HOOKS = [
+  "Nobody mentions this",
+  "I wish I knew this earlier",
+  "Pause for a second",
+  "Ever notice this pattern",
+  "Here's the real truth",
+  "Let me save you hours",
+  "This may surprise you",
+  "You need this now",
+  "You may not agree with this",
+  "I just figured this out",
+] as const;
+
 interface FoundClip {
   framework: string;
   platform: string;
@@ -54,13 +68,15 @@ interface FoundClip {
   title: string;
   hook: string;
   score: number;
+  hasNaturalHook: boolean;
+  suggestedHook?: string; // one of VIRAL_HOOKS, only set when hasNaturalHook=false
 }
 
 interface MissingFramework {
   framework: string;
   platform: string;
   reason: string;
-  suggestedScript: string;
+  suggestedScript: string; // GPT always starts this with the best-fit hook
   mood: "motivational" | "educational" | "inspiring" | "energetic";
 }
 
@@ -166,6 +182,24 @@ Analyze this transcript and try to find moments matching 6 specific viral framew
    Structure: Hook ("X ways to...") → Rapid-fire numbered points → Clean memorable ending
    Look for: Any content with 2+ distinct tips/points that can be delivered quickly
 
+## VIRAL HOOKS (for clips that need one):
+The following hooks may be prepended to any clip. Pick the one that fits most naturally given the clip's topic and tone:
+1. "Nobody mentions this"
+2. "I wish I knew this earlier"
+3. "Pause for a second"
+4. "Ever notice this pattern"
+5. "Here's the real truth"
+6. "Let me save you hours"
+7. "This may surprise you"
+8. "You need this now"
+9. "You may not agree with this"
+10. "I just figured this out"
+
+## HOOK RULES:
+- For each FOUND clip: set "hasNaturalHook": true if the clip already opens with a strong, attention-grabbing statement (bold claim, surprising fact, strong opinion, relatable pain) that would stop a scroller. Set false if it opens with context-setting, mid-story, or a weak/neutral statement.
+- If hasNaturalHook is false: set "suggestedHook" to the single best hook from the list above that fits the clip's specific topic and tone. Do NOT include a period after the hook — it will be joined to the content.
+- For each MISSING clip: ALWAYS start "suggestedScript" with the best hook from the list above, followed by a comma or dash, then the rest of the script. Example: "Nobody mentions this — most toddler nutrition advice ignores healthy fats entirely."
+
 ## RULES:
 - **#1 RULE — COMPLETE THE THOUGHT.** Never cut mid-sentence, mid-clause, or on a connector word (and, but, so, because, the, a, etc.). A clip that runs 2-3 seconds past the framework max to finish the idea is always better than one that ends on an incomplete thought.
 - start and end times must land on full sentence boundaries. If the natural sentence end is slightly past the max, use that end time anyway.
@@ -190,7 +224,9 @@ Return ONLY valid JSON, no markdown, no explanation:
       "end": 24.1,
       "title": "Why most businesses fail",
       "hook": "This is why 99% of businesses fail on TikTok",
-      "score": 87
+      "score": 87,
+      "hasNaturalHook": true,
+      "suggestedHook": null
     }
   ],
   "missing": [
@@ -198,7 +234,7 @@ Return ONLY valid JSON, no markdown, no explanation:
       "framework": "hot_take",
       "platform": "tiktok",
       "reason": "No strong controversial opinions or polarizing statements found in this content",
-      "suggestedScript": "Stop optimizing for likes. Likes do not pay your bills. The creators actually scaling their revenue track one metric: click-through on the link in bio. Vanity metrics are the enemy of real growth. Measure what converts, ignore everything else.",
+      "suggestedScript": "You may not agree with this, but stop optimizing for likes. Likes do not pay your bills. The creators actually scaling their revenue track one metric: click-through on the link in bio. Vanity metrics are the enemy of real growth. Measure what converts, ignore everything else.",
       "mood": "motivational"
     }
   ]
@@ -306,40 +342,91 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Detect video rotation once, cache in DB metadata (same as Type 2 pipeline)
-  const existingMeta = (video.metadata ?? {}) as Record<string, unknown>;
-  const videoRotation = (existingMeta.videoRotation as number | undefined) ?? 0;
+  // ── Best clip selection: pick the single best clip ──────────────────────────
+  // Priority: Type 1 (original footage, 0% HeyGen) > Type 2 (fully synthetic).
+  // Among Type 1 clips, pick the highest GPT score.
+  // If no Type 1 clips exist, fall back to the highest-priority Type 2 framework.
+  const type2PriorityOrder = [
+    "pattern_interrupt", "hot_take", "relatable_hook", "before_after", "open_loop", "list_format",
+  ];
 
-  let submitted = 0;
-  const type1RenderJobs: Array<{
-    clipId: string;
-    snappedStart: number;
-    durationSec: number;
-    wordTimings: Array<{ word: string; start: number; end: number }>;
-  }> = [];
+  const bestType1 = result.clips.reduce<FoundClip | null>((best, clip) => {
+    if (!best || clip.score > best.score) return clip;
+    return best;
+  }, null);
 
-  // Create PROCESSING clips and queue Remotion renders for Type 1 clips
-  for (const found of result.clips) {
-    const fw = FRAMEWORKS.find((f) => f.id === found.framework);
-    if (!fw) continue;
+  const bestType2 = type2PriorityOrder
+    .map((id) => result.missing.find((m) => m.framework === id))
+    .find(Boolean) ?? null;
 
-    // Snap GPT timestamps to actual word boundaries to avoid mid-word cuts
+  if (!bestType1 && !bestType2) {
+    console.log(`[assemblyai] video=${videoId}: no viable clips found`);
+    await db.uploadedVideo.update({ where: { id: videoId }, data: { status: "READY" } });
+    return NextResponse.json({ ok: true });
+  }
+
+  console.log(
+    `[assemblyai] video=${videoId}: best pick = ${bestType1 ? `Type1/${bestType1.framework}(score=${bestType1.score})` : `Type2/${bestType2!.framework}`}`
+  );
+
+  // ── Process the single chosen clip ──────────────────────────────────────────
+
+  if (bestType1) {
+    const found = bestType1;
+    const fw = FRAMEWORKS.find((f) => f.id === found.framework)!;
+
     const snappedStart = snapToWordBoundary(transcript.words!, found.start, "start");
     const snappedEnd   = snapToWordBoundary(transcript.words!, found.end,   "end");
     const durationSec  = Math.max(1, snappedEnd - snappedStart);
 
-    console.log(`[assemblyai] ${found.framework} raw=${found.start}s-${found.end}s → snapped=${snappedStart.toFixed(2)}s-${snappedEnd.toFixed(2)}s (${durationSec.toFixed(2)}s)`);
+    console.log(
+      `[assemblyai] ${found.framework} raw=${found.start}s-${found.end}s → snapped=${snappedStart.toFixed(2)}s-${snappedEnd.toFixed(2)}s (${durationSec.toFixed(2)}s)`
+    );
 
-    try {
-      // Convert AssemblyAI word timings (ms, absolute) → Remotion format (seconds, clip-relative)
-      const clipWordTimings = (transcript.words ?? [])
-        .filter(w => w.start / 1000 >= snappedStart - 0.05 && w.end / 1000 <= snappedEnd + 0.35)
-        .map(w => ({
-          word: w.text,
-          start: parseFloat((w.start / 1000 - snappedStart).toFixed(3)),
-          end: parseFloat((w.end / 1000 - snappedStart).toFixed(3)),
-        }));
+    const clipWordTimings = (transcript.words ?? [])
+      .filter(w => w.start / 1000 >= snappedStart - 0.05 && w.end / 1000 <= snappedEnd + 0.35)
+      .map(w => ({
+        word: w.text,
+        start: parseFloat((w.start / 1000 - snappedStart).toFixed(3)),
+        end: parseFloat((w.end / 1000 - snappedStart).toFixed(3)),
+      }));
 
+    const needsHookPrepend = !found.hasNaturalHook && !!found.suggestedHook;
+
+    if (needsHookPrepend) {
+      // ── Type 1 + hook: GENERATING_AI hybrid clip ──────────────────────────
+      // processAiClip will TTS the hook, HeyGen lipsync it, then Remotion combines
+      // [hook face video] + [original footage segment].
+      const hybridClip = await db.repurposedClip.create({
+        data: {
+          videoId,
+          title: found.title,
+          duration: Math.round(durationSec),
+          startTime: snappedStart,
+          endTime: snappedEnd,
+          status: "GENERATING_AI",
+          platform: fw.platform,
+          format: found.framework,
+          reelScript: {
+            isHybridWithOriginal: true,
+            hookText: found.suggestedHook,
+            originalStart: snappedStart,
+            originalEnd: snappedEnd,
+            originalSrc: video.storagePath,
+            originalWordTimings: clipWordTimings,
+            mood: "motivational",
+            frameworkName: fw.name,
+          },
+          metadata: {},
+          hashtags: [],
+        },
+      });
+      console.log(
+        `[assemblyai] clip=${hybridClip.id} framework=${found.framework} platform=${fw.platform} hook="${found.suggestedHook}" → GENERATING_AI hybrid`
+      );
+      waitUntil(processAiClip(hybridClip.id));
+    } else {
+      // ── Type 1, no hook needed: direct Remotion render ────────────────────
       const clip = await db.repurposedClip.create({
         data: {
           videoId,
@@ -353,123 +440,69 @@ export async function POST(req: Request) {
           hashtags: [],
         },
       });
-
-      type1RenderJobs.push({
-        clipId: clip.id,
-        snappedStart,
-        durationSec,
-        wordTimings: clipWordTimings,
-      });
-
       console.log(
         `[assemblyai] clip=${clip.id} framework=${found.framework} platform=${fw.platform} score=${found.score} words=${clipWordTimings.length} → queued for Remotion`
       );
-      submitted++;
-    } catch (err) {
-      console.error(
-        `[assemblyai] failed to submit ${found.framework} clip for video=${videoId}:`, err
-      );
-    }
-  }
 
-  // Kick off Remotion renders for all Type 1 clips in parallel (background)
-  if (type1RenderJobs.length > 0) {
-    const videoSrc = video.storagePath;
-    waitUntil(
-      Promise.all(
-        type1RenderJobs.map(async (job) => {
-          try {
-            const outputUrl = await remotionRenderService.renderClipAndWait({
-              segments: [{ type: 'original', src: videoSrc, startFrom: job.snappedStart, duration: job.durationSec, offsetFrom: 0 }],
-              wordTimings: job.wordTimings,
-              captionStyle: 'KARAOKE',
-              totalDurationSec: job.durationSec,
-            });
+      const videoSrc = video.storagePath;
+      waitUntil(
+        remotionRenderService
+          .renderClipAndWait({
+            segments: [{ type: 'original', src: videoSrc, startFrom: snappedStart, duration: durationSec, offsetFrom: 0 }],
+            wordTimings: clipWordTimings,
+            captionStyle: 'KARAOKE',
+            totalDurationSec: durationSec,
+          })
+          .then(async (outputUrl) => {
             await db.repurposedClip.update({
-              where: { id: job.clipId },
+              where: { id: clip.id },
               data: { storagePath: outputUrl, status: 'READY' },
             });
-            console.log(`[assemblyai] Type 1 clip ready: clipId=${job.clipId} url=${outputUrl}`);
-          } catch (err) {
-            console.error(`[assemblyai] Remotion render failed: clipId=${job.clipId}`, err);
-            await db.repurposedClip.update({
-              where: { id: job.clipId },
-              data: { status: 'FAILED' },
-            });
-          }
-        })
-      )
-    );
-  }
-
-  // Create GENERATING_AI clips for missing frameworks — AI fill pipeline handles the rest
-  // Cap: skip AI fill for any platform that already has ≥1 Type 1 (found) clip.
-  // Type 1 clips don't use HeyGen; Type 2 clips do — no point burning credits when
-  // the platform is already covered by original footage.
-  const platformsCoveredByType1 = new Set(
-    result.clips.map((c) => FRAMEWORKS.find((f) => f.id === c.framework)?.platform).filter(Boolean)
-  );
-
-  let aiQueued = 0;
-  const aiClipIds: string[] = [];
-  for (const missing of result.missing) {
-    const fw = FRAMEWORKS.find((f) => f.id === missing.framework);
-    if (!fw) continue;
-
-    if (platformsCoveredByType1.has(fw.platform)) {
-      console.log(
-        `[assemblyai] skipping AI fill for ${missing.framework} (${fw.platform} already covered by Type 1 clip)`
-      );
-      continue;
-    }
-
-    // Target the midpoint of the framework's duration range
-    const targetDuration = Math.round((fw.minSec + fw.maxSec) / 2);
-
-    try {
-      const aiClip = await db.repurposedClip.create({
-        data: {
-          videoId,
-          title: fw.name,
-          duration: targetDuration,
-          status: "GENERATING_AI",
-          platform: fw.platform,
-          format: missing.framework,
-          reelScript: {
-            suggestedScript: missing.suggestedScript,
-            mood: missing.mood ?? "motivational",
-            reason: missing.reason,
-            frameworkName: fw.name,
-            targetSec: targetDuration,
-            minSec: fw.minSec,
-            maxSec: fw.maxSec,
-          },
-          hashtags: [],
-        },
-      });
-
-      aiClipIds.push(aiClip.id);
-      console.log(
-        `[assemblyai] GENERATING_AI framework=${missing.framework} platform=${fw.platform} targetDuration=${targetDuration}s clipId=${aiClip.id}`
-      );
-      aiQueued++;
-    } catch (err) {
-      console.error(
-        `[assemblyai] failed to create ai-fill record for ${missing.framework}:`, err
+            console.log(`[assemblyai] Type 1 clip ready: clipId=${clip.id} url=${outputUrl}`);
+          })
+          .catch(async (err) => {
+            console.error(`[assemblyai] Remotion render failed: clipId=${clip.id}`, err);
+            await db.repurposedClip.update({ where: { id: clip.id }, data: { status: 'FAILED' } });
+          })
       );
     }
+
+    console.log(`[assemblyai] video=${videoId}: 1 clip queued (Type 1 ${found.framework})`);
+    return NextResponse.json({ ok: true, submitted: 1, aiQueued: 0 });
   }
 
-  // Trigger the Type 2 pipeline sequentially to stay within ElevenLabs concurrency limit
-  waitUntil(
-    aiClipIds.reduce(
-      (chain: Promise<void>, id: string) => chain.then(() => processAiClip(id)),
-      Promise.resolve()
-    )
-  );
+  // ── Type 2 fallback: fully synthetic clip (hook embedded in suggestedScript) ──
+  const missing = bestType2!;
+  const fw = FRAMEWORKS.find((f) => f.id === missing.framework)!;
+  const targetDuration = Math.round((fw.minSec + fw.maxSec) / 2);
+
+  const aiClip = await db.repurposedClip.create({
+    data: {
+      videoId,
+      title: fw.name,
+      duration: targetDuration,
+      status: "GENERATING_AI",
+      platform: fw.platform,
+      format: missing.framework,
+      reelScript: {
+        suggestedScript: missing.suggestedScript,
+        mood: missing.mood ?? "motivational",
+        reason: missing.reason,
+        frameworkName: fw.name,
+        targetSec: targetDuration,
+        minSec: fw.minSec,
+        maxSec: fw.maxSec,
+      },
+      hashtags: [],
+    },
+  });
 
   console.log(
-    `[assemblyai] video=${videoId}: ${submitted} Remotion renders queued, ${aiQueued} AI fill clips queued`
+    `[assemblyai] GENERATING_AI framework=${missing.framework} platform=${fw.platform} targetDuration=${targetDuration}s clipId=${aiClip.id}`
   );
-  return NextResponse.json({ ok: true, submitted, aiQueued });
+
+  waitUntil(processAiClip(aiClip.id));
+
+  console.log(`[assemblyai] video=${videoId}: 1 clip queued (Type 2 ${missing.framework})`);
+  return NextResponse.json({ ok: true, submitted: 0, aiQueued: 1 });
 }

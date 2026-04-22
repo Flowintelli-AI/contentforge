@@ -97,6 +97,74 @@ export async function POST(req: Request) {
         data: { metadata: { ...existingMeta, heygenVideoUrl: videoUrl } },
       });
 
+      // ── Check if this is a hybrid clip (Type 1 + hook prepend) ─────────────
+      const reelScriptData = (lipsyncClip.reelScript as Record<string, unknown> | null) ?? {};
+      const isHybrid = reelScriptData.isHybridWithOriginal === true;
+
+      if (isHybrid) {
+        // Hybrid: hook face video + original footage segment
+        const hookWordTimings =
+          ((lipsyncClip.metadata as Record<string, unknown> | null)?.hookWordTimings as
+            Array<{ word: string; start: number; end: number }>) ?? [];
+        const originalWordTimings =
+          (reelScriptData.originalWordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
+        const originalStart = reelScriptData.originalStart as number ?? 0;
+        const originalEnd = reelScriptData.originalEnd as number ?? 0;
+        const originalSrc = reelScriptData.originalSrc as string;
+        const hookDurationSec =
+          hookWordTimings.length > 0 ? hookWordTimings[hookWordTimings.length - 1].end + 0.5 : 3;
+        const originalDurationSec = Math.max(1, originalEnd - originalStart);
+        const totalDurationSec = hookDurationSec + originalDurationSec;
+
+        // Offset original word timings by hook duration so captions stay in sync
+        const offsetOriginalTimings = originalWordTimings.map((w) => ({
+          ...w,
+          start: parseFloat((w.start + hookDurationSec).toFixed(3)),
+          end: parseFloat((w.end + hookDurationSec).toFixed(3)),
+        }));
+        const combinedWordTimings = [...hookWordTimings, ...offsetOriginalTimings];
+
+        logger.info("Hybrid lipsync complete, queuing Remotion render", {
+          clipId: lipsyncClip.id,
+          hookDurationSec,
+          originalDurationSec,
+          totalDurationSec,
+          combinedWords: combinedWordTimings.length,
+        });
+
+        waitUntil(
+          remotionRenderService
+            .renderClipAndWait({
+              segments: [
+                { type: 'heygen', src: videoUrl, startFrom: 0, duration: hookDurationSec, offsetFrom: 0 },
+                { type: 'original', src: originalSrc, startFrom: originalStart, duration: originalDurationSec, offsetFrom: hookDurationSec },
+              ],
+              wordTimings: combinedWordTimings,
+              captionStyle: 'KARAOKE',
+              totalDurationSec,
+            })
+            .then(async (outputUrl) => {
+              await db.repurposedClip.update({
+                where: { id: lipsyncClip.id },
+                data: { storagePath: outputUrl, status: 'READY' },
+              });
+              logger.info("Hybrid clip ready", { clipId: lipsyncClip.id, outputUrl });
+            })
+            .catch(async (err) => {
+              logger.error("Remotion render failed for hybrid clip", {
+                clipId: lipsyncClip.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+              await db.repurposedClip.update({
+                where: { id: lipsyncClip.id },
+                data: { status: 'FAILED' },
+              });
+            })
+        );
+        return NextResponse.json({ received: true });
+      }
+
+      // ── Standard Type 2: full synthetic clip ────────────────────────────────
       logger.info("Lipsync complete, queuing Remotion render", {
         clipId: lipsyncClip.id,
         wordTimings: wordTimings.length,

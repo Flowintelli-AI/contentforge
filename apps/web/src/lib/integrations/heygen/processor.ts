@@ -16,6 +16,13 @@ interface ReelScriptJson {
   targetSec?: number;
   minSec?: number;
   maxSec?: number;
+  // Hybrid Type 1+hook: TTS only the hook, then Remotion combines with original footage
+  isHybridWithOriginal?: boolean;
+  hookText?: string;
+  originalStart?: number;
+  originalEnd?: number;
+  originalSrc?: string;
+  originalWordTimings?: Array<{ word: string; start: number; end: number }>;
 }
 
 /**
@@ -46,6 +53,80 @@ export async function processAiClip(clipId: string): Promise<void> {
   }
 
   const reelScript = clip.reelScript as ReelScriptJson | null;
+
+  // ── Hybrid mode: Type 1 clip that needs a hook prepend ──────────────────────
+  // TTS only the hook text; HeyGen lipsync will produce the short hook face video.
+  // The HeyGen webhook then combines [hook face] + [original footage] in Remotion.
+  if (reelScript?.isHybridWithOriginal) {
+    const hookText = reelScript.hookText;
+    if (!hookText) {
+      logger.error("Hybrid clip missing hookText", { clipId });
+      await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+      return;
+    }
+
+    const voiceId = video.clonedVoiceId ?? process.env.ELEVENLABS_VOICE_ID;
+    if (!voiceId) {
+      logger.error("No voice ID for hybrid clip hook", { clipId });
+      await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+      return;
+    }
+
+    logger.info("Generating hook voiceover (hybrid Type 1+hook)", { clipId, hookText, voiceId });
+
+    try {
+      const { url: audioUrl, wordTimings: hookWordTimings } = await generateAndUploadVoiceover(
+        hookText,
+        voiceId,
+        `hook-${clipId}`,
+      );
+      logger.info("Hook voiceover ready", { clipId, audioUrl, words: hookWordTimings.length });
+
+      const hookDuration = hookWordTimings.length > 0
+        ? hookWordTimings[hookWordTimings.length - 1].end
+        : 3;
+
+      // Store hook word timings; original word timings are in reelScript.originalWordTimings
+      const existingMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
+      await db.repurposedClip.update({
+        where: { id: clipId },
+        data: { metadata: { ...existingMeta, hookWordTimings } },
+      });
+
+      // Trim face video to hook duration only
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
+      const encodedAudioUrl = encodeURIComponent(audioUrl);
+      const shotstackCallback = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}&purpose=heygen&audioUrl=${encodedAudioUrl}`;
+
+      const existingVideoMeta = (video.metadata as Record<string, unknown> | null) ?? {};
+      const rotationDeg = (existingVideoMeta.videoRotation as number | undefined) ?? 0;
+
+      const renderId = await trimVideoWithShotstack(
+        video.storagePath,
+        hookDuration,
+        shotstackCallback,
+        undefined,
+        rotationDeg,
+      );
+      logger.info("Hook Shotstack trim submitted", { clipId, renderId, hookDuration });
+
+      await db.repurposedClip.update({
+        where: { id: clipId },
+        data: {
+          opusClipId: `shotstack-trim:${renderId}`,
+          status: "PROCESSING",
+          isAIGenerated: false, // This is a hybrid: has original footage component
+        },
+      });
+    } catch (err) {
+      const errDetail = err instanceof Error ? { message: err.message, name: err.name } : err;
+      logger.error("Failed to process hybrid clip hook", { clipId, err: errDetail });
+      await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
+    }
+    return;
+  }
+
+  // ── Standard Type 2 mode ─────────────────────────────────────────────────────
   const script = reelScript?.suggestedScript;
   if (!script) {
     logger.error("No suggestedScript in reelScript — cannot generate voiceover", { clipId });
