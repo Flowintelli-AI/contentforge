@@ -384,7 +384,8 @@ export async function trimAndUploadFaceVideo(
 
     // For rotated videos, bake in the rotation with libx264 so HeyGen receives
     // correctly-oriented pixels. transpose=1 = 90° CW (Samsung portrait stored
-    // as landscape with rotation=90). Strip audio — HeyGen replaces it anyway.
+    // as landscape with rotation=90). Keep audio (-c:a copy) — HeyGen requires
+    // an audio track in the face video even though it replaces it during lipsync.
     const ffmpegArgs: string[] = rotationDeg !== 0
       ? [
           "-i", inputPath,
@@ -393,14 +394,14 @@ export async function trimAndUploadFaceVideo(
           "-c:v", "libx264",
           "-preset", "fast",
           "-crf", "23",
-          "-an",
+          "-c:a", "copy",
           "-y", outputPath,
         ]
       : [
           "-i", inputPath,
           "-t", String(trimSec),
           "-c:v", "copy",
-          "-an",
+          "-c:a", "copy",
           "-avoid_negative_ts", "make_zero",
           "-y", outputPath,
         ];
