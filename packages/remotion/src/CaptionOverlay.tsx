@@ -82,6 +82,7 @@ const KaraokeCaption: React.FC<{
   const activeIdx = wordTimings.findIndex(
     (w) => currentTime >= w.start && currentTime <= w.end
   );
+  if (activeIdx === -1) return null;
   // Show a 4-word window centered on active word
   const start = Math.max(0, activeIdx - 1);
   const visible = wordTimings.slice(start, start + 4);
@@ -136,8 +137,8 @@ const HighlightCaption: React.FC<{
   const sentenceIdx = sentences.findIndex((s) =>
     currentTime >= s[0].start && currentTime <= s[s.length - 1].end
   );
-  const sentence = sentences[Math.max(0, sentenceIdx)];
-  if (!sentence) return null;
+  if (sentenceIdx === -1) return null;
+  const sentence = sentences[sentenceIdx];
 
   return (
     <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 120 }}>
@@ -190,8 +191,8 @@ const CleanCaption: React.FC<{
   const sentenceIdx = sentences.findIndex((s) =>
     currentTime >= s[0].start && currentTime <= s[s.length - 1].end
   );
-  const sentence = sentences[Math.max(0, sentenceIdx)];
-  if (!sentence) return null;
+  if (sentenceIdx === -1) return null;
+  const sentence = sentences[sentenceIdx];
 
   const sentenceStartFrame = Math.round(sentence[0].start * fps);
   const opacity = interpolate(frame, [sentenceStartFrame, sentenceStartFrame + 6], [0, 1], {

@@ -176,6 +176,9 @@ export async function cloneVoiceFromVideo(
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY is not set");
 
+  // Before cloning, ensure we have capacity. If at limit, prune oldest Speaker- voices.
+  await pruneElevenLabsVoicesIfNeeded(apiKey);
+
   // ElevenLabs IVC rejects files > 11 MB. Full phone videos are typically 30-100 MB.
   // Fix: use ffmpeg to extract the first 30 s of audio as MP3 (~480 KB) and send that.
   const bin = await resolveFfmpegBin();
@@ -229,6 +232,48 @@ export async function cloneVoiceFromVideo(
     return voice_id;
   } finally {
     await Promise.allSettled([unlink(inputPath), unlink(audioPath)]);
+  }
+}
+
+/**
+ * Deletes old "Speaker-" voices (auto-cloned by ContentForge) when at or near the 30-voice limit.
+ * Keeps voices that are still referenced in the DB. Deletes oldest first.
+ */
+async function pruneElevenLabsVoicesIfNeeded(apiKey: string): Promise<void> {
+  try {
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+      headers: { "xi-api-key": apiKey },
+    });
+    if (!res.ok) return;
+    const { voices } = (await res.json()) as { voices: Array<{ voice_id: string; name: string; created_at_unix: number }> };
+
+    // Only auto-cloned voices are candidates for deletion
+    const autoVoices = voices
+      .filter(v => v.name.startsWith("Speaker-"))
+      .sort((a, b) => (a.created_at_unix ?? 0) - (b.created_at_unix ?? 0)); // oldest first
+
+    if (voices.length < 28) return; // plenty of space, nothing to prune
+
+    // Find which voice IDs are still in active use in the DB
+    const activeIds = await db.uploadedVideo
+      .findMany({ where: { clonedVoiceId: { not: null } }, select: { clonedVoiceId: true } })
+      .then(rows => new Set(rows.map(r => r.clonedVoiceId!)));
+
+    // Delete oldest Speaker- voices that aren't actively used, until we have 2 free slots
+    const needed = voices.length - 28; // how many to delete to get to ≤28
+    let deleted = 0;
+    for (const v of autoVoices) {
+      if (deleted >= needed) break;
+      if (activeIds.has(v.voice_id)) continue; // skip active voices
+      await fetch(`https://api.elevenlabs.io/v1/voices/${v.voice_id}`, {
+        method: "DELETE",
+        headers: { "xi-api-key": apiKey },
+      });
+      console.log(`[clone-voice] Pruned old voice ${v.voice_id} (${v.name})`);
+      deleted++;
+    }
+  } catch (err) {
+    console.warn("[clone-voice] Voice pruning failed (non-fatal):", err);
   }
 }
 
