@@ -153,6 +153,8 @@ class LiveHeyGenService implements IHeyGenService {
         video: { type: "url", url: params.faceVideoUrl },
         audio: { type: "url", url: params.audioUrl },
         mode: "speed",
+        disable_music_track: true,
+        keep_the_same_format: true,
         ...(params.title ? { title: params.title } : {}),
         ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
         // Partial lipsync: HeyGen processes only this time range and charges accordingly.
