@@ -382,16 +382,15 @@ export async function trimAndUploadFaceVideo(
     if (!res.ok || !res.body) throw new Error(`Failed to fetch source video: ${res.status}`);
     await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(inputPath));
 
-    // For rotated videos, bake the rotation into pixels with libx264 and then
-    // explicitly zero out the rotation metadata tag. Without -metadata:s:v:0 rotate=0,
-    // ffmpeg preserves the original tag even after re-encoding → HeyGen/Remotion
-    // double-rotates (pixels already rotated CW + tag says rotate CW again = sideways).
+    // For rotated videos: ffmpeg auto-rotates decoded frames by default (autorotate=1).
+    // We rely on that behavior — no explicit -vf transpose needed. Re-encoding with
+    // libx264 bakes the correctly-oriented pixels into the output. We then zero out
+    // the residual rotate tag so HeyGen/Remotion don't double-rotate.
     // Keep audio (-c:a copy) — HeyGen requires an audio track even though it replaces it.
     const ffmpegArgs: string[] = rotationDeg !== 0
       ? [
           "-i", inputPath,
           "-t", String(trimSec),
-          "-vf", transposeFilter(rotationDeg),
           "-c:v", "libx264",
           "-preset", "fast",
           "-crf", "23",
