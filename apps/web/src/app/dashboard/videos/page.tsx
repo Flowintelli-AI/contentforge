@@ -62,7 +62,6 @@ export default function VideosPage() {
   const [pollEnabled, setPollEnabled] = useState(false);
   const [clipsDialogVideoId, setClipsDialogVideoId] = useState<string | null>(null);
   // Track clips we've already fired ai-generate for (avoids re-triggering on re-render)
-  const triggeredAiFills = useRef<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const utils = api.useUtils();
@@ -80,20 +79,8 @@ export default function VideosPage() {
     setPollEnabled(hasProcessing);
   }, [videos]);
 
-  // Auto-trigger ai-generate for any GENERATING_AI clips not yet fired
-  useEffect(() => {
-    for (const video of videos) {
-      for (const clip of video.clips) {
-        if (clip.status === "GENERATING_AI" && !triggeredAiFills.current.has(clip.id)) {
-          triggeredAiFills.current.add(clip.id);
-          fetch(`/api/clips/${clip.id}/ai-generate`, { method: "POST" })
-            .then((r) => r.json())
-            .then((d) => console.log(`[ai-fill] clip=${clip.id}`, d))
-            .catch((e) => console.error(`[ai-fill] clip=${clip.id}`, e));
-        }
-      }
-    }
-  }, [videos]);
+  // NOTE: ai-generate auto-trigger removed. The new pipeline handles GENERATING_AI clips
+  // automatically via AssemblyAI webhook → processAiClip → HeyGen → Remotion.
 
   const createMutation = api.videos.create.useMutation({
     onSuccess: () => {
