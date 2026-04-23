@@ -17,6 +17,20 @@ interface Props {
 
 const SENTENCE_WINDOW = 6; // words visible at once for HIGHLIGHT/CLEAN
 
+/**
+ * Clamps each word's end time to the start of the next word.
+ * ElevenLabs sometimes reports long end times that include trailing silence,
+ * causing words to stay visible during pauses between phrases.
+ */
+function clampWordEnds(words: WordTiming[]): WordTiming[] {
+  return words.map((w, i) => {
+    const nextStart = words[i + 1]?.start;
+    return nextStart !== undefined && nextStart < w.end
+      ? { ...w, end: nextStart }
+      : w;
+  });
+}
+
 function groupIntoSentences(words: WordTiming[], windowSize: number): WordTiming[][] {
   const groups: WordTiming[][] = [];
   for (let i = 0; i < words.length; i += windowSize) {
@@ -37,10 +51,12 @@ export const CaptionOverlay: React.FC<Props> = ({
 
   if (!wordTimings || wordTimings.length === 0) return null;
 
+  const clamped = clampWordEnds(wordTimings);
+
   if (captionStyle === 'KARAOKE') {
     return (
       <KaraokeCaption
-        wordTimings={wordTimings}
+        wordTimings={clamped}
         currentTime={currentTime}
         primaryColor={primaryColor}
         highlightColor={highlightColor}
@@ -51,7 +67,7 @@ export const CaptionOverlay: React.FC<Props> = ({
   if (captionStyle === 'HIGHLIGHT') {
     return (
       <HighlightCaption
-        wordTimings={wordTimings}
+        wordTimings={clamped}
         currentTime={currentTime}
         primaryColor={primaryColor}
         highlightColor={highlightColor}
@@ -62,7 +78,7 @@ export const CaptionOverlay: React.FC<Props> = ({
 
   return (
     <CleanCaption
-      wordTimings={wordTimings}
+      wordTimings={clamped}
       currentTime={currentTime}
       primaryColor={primaryColor}
       windowSize={SENTENCE_WINDOW}
