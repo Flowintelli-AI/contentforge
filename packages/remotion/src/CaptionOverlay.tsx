@@ -15,12 +15,12 @@ interface Props {
   highlightColor?: string;
 }
 
-const SENTENCE_WINDOW = 6; // words visible at once for HIGHLIGHT/CLEAN
+const SENTENCE_WINDOW = 6; // max words per group for HIGHLIGHT/CLEAN
+const PAUSE_THRESHOLD = 0.35; // seconds — gap larger than this = phrase boundary
 
 /**
  * Clamps each word's end time to the start of the next word.
- * ElevenLabs sometimes reports long end times that include trailing silence,
- * causing words to stay visible during pauses between phrases.
+ * ElevenLabs sometimes reports long end times that include trailing silence.
  */
 function clampWordEnds(words: WordTiming[]): WordTiming[] {
   return words.map((w, i) => {
@@ -31,12 +31,45 @@ function clampWordEnds(words: WordTiming[]): WordTiming[] {
   });
 }
 
-function groupIntoSentences(words: WordTiming[], windowSize: number): WordTiming[][] {
+/**
+ * Groups words into phrases by detecting pauses > PAUSE_THRESHOLD,
+ * then sub-divides large phrases by windowSize.
+ * This guarantees no group ever spans a silence gap.
+ */
+function groupByPauses(words: WordTiming[], windowSize: number): WordTiming[][] {
+  // Split into phrase chunks at silence boundaries
+  const phrases: WordTiming[][] = [];
+  let current: WordTiming[] = [words[0]];
+  for (let i = 1; i < words.length; i++) {
+    if (words[i].start - words[i - 1].end > PAUSE_THRESHOLD) {
+      phrases.push(current);
+      current = [words[i]];
+    } else {
+      current.push(words[i]);
+    }
+  }
+  if (current.length) phrases.push(current);
+
+  // Sub-divide large phrases into windowSize chunks
   const groups: WordTiming[][] = [];
-  for (let i = 0; i < words.length; i += windowSize) {
-    groups.push(words.slice(i, i + windowSize));
+  for (const phrase of phrases) {
+    for (let i = 0; i < phrase.length; i += windowSize) {
+      groups.push(phrase.slice(i, i + windowSize));
+    }
   }
   return groups;
+}
+
+/**
+ * Returns the [start, end) index range of the phrase containing wordIdx.
+ * A phrase is a run of consecutive words with no gap > PAUSE_THRESHOLD.
+ */
+function getPhraseBounds(words: WordTiming[], wordIdx: number): [number, number] {
+  let lo = wordIdx;
+  let hi = wordIdx + 1;
+  while (lo > 0 && words[lo].start - words[lo - 1].end <= PAUSE_THRESHOLD) lo--;
+  while (hi < words.length && words[hi].start - words[hi - 1].end <= PAUSE_THRESHOLD) hi++;
+  return [lo, hi];
 }
 
 export const CaptionOverlay: React.FC<Props> = ({
@@ -52,6 +85,11 @@ export const CaptionOverlay: React.FC<Props> = ({
   if (!wordTimings || wordTimings.length === 0) return null;
 
   const clamped = clampWordEnds(wordTimings);
+
+  // Hard silence gate: ONLY render captions when audio is actively playing.
+  // No fallback, no look-ahead — captions must match the spoken audio exactly.
+  const isInSpeech = clamped.some(w => currentTime >= w.start && currentTime <= w.end);
+  if (!isInSpeech) return null;
 
   if (captionStyle === 'KARAOKE') {
     return (
@@ -99,9 +137,12 @@ const KaraokeCaption: React.FC<{
     (w) => currentTime >= w.start && currentTime <= w.end
   );
   if (activeIdx === -1) return null;
-  // Show a 4-word window centered on active word
-  const start = Math.max(0, activeIdx - 1);
-  const visible = wordTimings.slice(start, start + 4);
+
+  // Restrict the window to words within the same phrase (no cross-silence leaking).
+  const [phraseStart, phraseEnd] = getPhraseBounds(wordTimings, activeIdx);
+  const windowStart = Math.max(phraseStart, activeIdx - 1);
+  const windowEnd = Math.min(phraseEnd, windowStart + 4);
+  const visible = wordTimings.slice(windowStart, windowEnd);
 
   return (
     <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 120 }}>
@@ -119,7 +160,7 @@ const KaraokeCaption: React.FC<{
           const isActive = currentTime >= w.start && currentTime <= w.end;
           return (
             <span
-              key={`${w.word}-${start + i}`}
+              key={`${w.word}-${windowStart + i}`}
               style={{
                 fontFamily: 'Inter, Arial Black, sans-serif',
                 fontSize: isActive ? 60 : 52,
@@ -149,7 +190,7 @@ const HighlightCaption: React.FC<{
   highlightColor: string;
   windowSize: number;
 }> = ({ wordTimings, currentTime, primaryColor, highlightColor, windowSize }) => {
-  const sentences = groupIntoSentences(wordTimings, windowSize);
+  const sentences = groupByPauses(wordTimings, windowSize);
   const sentenceIdx = sentences.findIndex((s) =>
     currentTime >= s[0].start && currentTime <= s[s.length - 1].end
   );
@@ -203,7 +244,7 @@ const CleanCaption: React.FC<{
   fps: number;
   frame: number;
 }> = ({ wordTimings, currentTime, primaryColor, windowSize, fps, frame }) => {
-  const sentences = groupIntoSentences(wordTimings, windowSize);
+  const sentences = groupByPauses(wordTimings, windowSize);
   const sentenceIdx = sentences.findIndex((s) =>
     currentTime >= s[0].start && currentTime <= s[s.length - 1].end
   );
