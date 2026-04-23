@@ -19,6 +19,7 @@ export interface VideoSegment {
   startFrom: number;  // seconds into the source video to start from
   duration: number;   // seconds of this segment to include
   offsetFrom: number; // seconds from the composition start (0 for single-segment clips)
+  rotation?: number;  // EXIF rotation in degrees (0, 90, 180, 270)
 }
 
 export interface RenderClipInput {
