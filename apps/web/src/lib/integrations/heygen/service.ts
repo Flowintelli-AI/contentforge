@@ -152,9 +152,12 @@ class LiveHeyGenService implements IHeyGenService {
       const payload = {
         video: { type: "url", url: params.faceVideoUrl },
         audio: { type: "url", url: params.audioUrl },
-        mode: "speed",
+        // No "mode" → HeyGen uses full visual lipsync (face animation).
+        // "speed" mode was audio-only replacement (no lip movement) — removed.
         disable_music_track: true,
         keep_the_same_format: true,
+        enable_speech_enhancement: true,
+        fps_mode: "cfr",
         ...(params.title ? { title: params.title } : {}),
         ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
         // Partial lipsync: HeyGen processes only this time range and charges accordingly.
