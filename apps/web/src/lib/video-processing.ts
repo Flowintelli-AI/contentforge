@@ -382,10 +382,11 @@ export async function trimAndUploadFaceVideo(
     if (!res.ok || !res.body) throw new Error(`Failed to fetch source video: ${res.status}`);
     await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(inputPath));
 
-    // For rotated videos, bake in the rotation with libx264 so HeyGen receives
-    // correctly-oriented pixels. transpose=1 = 90° CW (Samsung portrait stored
-    // as landscape with rotation=90). Keep audio (-c:a copy) — HeyGen requires
-    // an audio track in the face video even though it replaces it during lipsync.
+    // For rotated videos, bake the rotation into pixels with libx264 and then
+    // explicitly zero out the rotation metadata tag. Without -metadata:s:v:0 rotate=0,
+    // ffmpeg preserves the original tag even after re-encoding → HeyGen/Remotion
+    // double-rotates (pixels already rotated CW + tag says rotate CW again = sideways).
+    // Keep audio (-c:a copy) — HeyGen requires an audio track even though it replaces it.
     const ffmpegArgs: string[] = rotationDeg !== 0
       ? [
           "-i", inputPath,
@@ -395,6 +396,7 @@ export async function trimAndUploadFaceVideo(
           "-preset", "fast",
           "-crf", "23",
           "-c:a", "copy",
+          "-metadata:s:v:0", "rotate=0",
           "-y", outputPath,
         ]
       : [
