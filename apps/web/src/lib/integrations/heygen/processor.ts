@@ -27,18 +27,29 @@ interface ReelScriptJson {
 }
 
 /**
- * Polls DB for clonedVoiceId up to maxWaitMs (default 90s), then clones inline if still null.
- * This avoids the race condition where AssemblyAI webhook fires before the background
- * performVoiceClone (in /process/route.ts) has written clonedVoiceId to the DB.
+ * Returns the voice ID to use for this video's clips.
+ * Priority: video.clonedVoiceId → creator.voiceCloneId (instant reuse) → poll for background clone → inline clone fallback.
  */
 async function ensureVoiceCloned(
-  video: { id: string; storagePath: string; clonedVoiceId: string | null },
+  video: { id: string; storagePath: string; clonedVoiceId: string | null; creatorId: string },
   clipId: string,
   maxWaitMs = 90_000,
 ): Promise<string | null> {
   if (video.clonedVoiceId) return video.clonedVoiceId;
 
   const logger = createLogger("heygen-processor");
+
+  // Fast path: creator already has a cloned voice — reuse it immediately
+  const creator = await db.creatorProfile.findUnique({
+    where: { id: video.creatorId },
+    select: { voiceCloneId: true },
+  });
+  if (creator?.voiceCloneId) {
+    logger.info("Reusing existing creator voice clone (no new clone needed)", { clipId, voiceId: creator.voiceCloneId });
+    await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: creator.voiceCloneId } });
+    return creator.voiceCloneId;
+  }
+
   const pollIntervalMs = 10_000;
   const polls = Math.floor(maxWaitMs / pollIntervalMs);
 
@@ -56,7 +67,11 @@ async function ensureVoiceCloned(
   logger.info("Background clone still pending after polling — cloning inline", { clipId, videoId: video.id });
   try {
     const newVoiceId = await cloneVoiceFromVideo(video.storagePath, video.id);
-    await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } });
+    // Save to video AND creator profile
+    await Promise.all([
+      db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } }),
+      db.creatorProfile.update({ where: { id: video.creatorId }, data: { voiceCloneId: newVoiceId } }),
+    ]);
     logger.info("Inline voice clone succeeded", { clipId, voiceId: newVoiceId });
     return newVoiceId;
   } catch (cloneErr) {

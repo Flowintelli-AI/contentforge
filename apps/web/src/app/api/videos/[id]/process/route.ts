@@ -69,12 +69,20 @@ export async function POST(
     const { id: transcriptId } = (await res.json()) as { id: string };
     console.log(`[process] ✅ transcription submitted id=${transcriptId} for video=${video.id}`);
 
-    // Voice clone: fire-and-forget via waitUntil so the HTTP response is returned
-    // immediately (~2s) while the clone runs in the background (up to maxDuration).
-    // AssemblyAI takes 3-5 min to complete, so the clone finishes before the webhook.
+    // Voice clone: if creator already has a cloned voice, reuse it immediately.
+    // Otherwise fire-and-forget via waitUntil so HTTP response is returned quickly.
     const elevenKey = process.env.ELEVENLABS_API_KEY;
-    if (elevenKey && !video.clonedVoiceId) {
-      waitUntil(performVoiceClone(video.id, video.storagePath, elevenKey));
+    if (elevenKey) {
+      if (profile.voiceCloneId && !video.clonedVoiceId) {
+        // Reuse existing creator voice — instant, no new clone needed
+        await db.uploadedVideo.update({
+          where: { id: video.id },
+          data: { clonedVoiceId: profile.voiceCloneId },
+        });
+        console.log(`[clone-voice] Reusing creator voice ${profile.voiceCloneId} for video=${video.id}`);
+      } else if (!video.clonedVoiceId && !profile.voiceCloneId) {
+        waitUntil(performVoiceClone(video.id, video.storagePath, elevenKey, profile.id));
+      }
     }
 
     // Detect rotation once and cache it — both pipelines will read the cached value.
@@ -114,21 +122,27 @@ async function detectAndCacheRotation(
     console.warn(`[process] rotation detection failed for video=${videoId} (non-fatal):`, err);
   }
 }
-// Voice clone using ffmpeg to extract a 30s MP3 sample and upload to ElevenLabs IVC.
-// Non-fatal: any failure is logged, processor falls back to ELEVENLABS_VOICE_ID.
 async function performVoiceClone(
   videoId: string,
   storagePath: string,
-  _elevenKey: string  // kept for call-site compatibility; cloneVoiceFromVideo reads env directly
+  _elevenKey: string,  // kept for call-site compatibility; cloneVoiceFromVideo reads env directly
+  creatorId: string,
 ) {
   try {
     console.log(`[clone-voice] Starting ffmpeg voice clone for video=${videoId}`);
     const voice_id = await cloneVoiceFromVideo(storagePath, videoId);
-    await db.uploadedVideo.update({
-      where: { id: videoId },
-      data: { clonedVoiceId: voice_id },
-    });
-    console.log(`[clone-voice] ✅ Cloned voice_id=${voice_id} for video=${videoId}`);
+    // Save to both the video AND the creator profile so future videos skip cloning
+    await Promise.all([
+      db.uploadedVideo.update({
+        where: { id: videoId },
+        data: { clonedVoiceId: voice_id },
+      }),
+      db.creatorProfile.update({
+        where: { id: creatorId },
+        data: { voiceCloneId: voice_id },
+      }),
+    ]);
+    console.log(`[clone-voice] ✅ Cloned voice_id=${voice_id} for video=${videoId} creator=${creatorId}`);
   } catch (err) {
     console.warn(`[clone-voice] Failed (non-fatal) for video=${videoId}:`, err);
   }
