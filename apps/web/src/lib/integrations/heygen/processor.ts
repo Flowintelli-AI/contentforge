@@ -2,8 +2,8 @@
 // Called via waitUntil after AssemblyAI webhook creates GENERATING_AI clips.
 
 import { db } from "@contentforge/db";
-import { generateAndUploadVoiceover, trimVideoWithShotstack, cloneVoiceFromVideo } from "@/lib/video-processing";
-import { fetchMoodTrack } from "@/lib/integrations/pixabay/music";
+import { generateAndUploadVoiceover, trimAndUploadFaceVideo, cloneVoiceFromVideo } from "@/lib/video-processing";
+import { heyGenService } from "@/lib/integrations/heygen/service";
 import { createLogger } from "../shared/logger";
 
 const logger = createLogger("heygen-processor");
@@ -107,31 +107,39 @@ export async function processAiClip(clipId: string): Promise<void> {
         data: { metadata: { ...existingMeta, hookWordTimings } },
       });
 
-      // Trim face video to hook duration only
+      // Trim face video to hook duration + bake in rotation, then submit to HeyGen directly
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
-      const encodedAudioUrl = encodeURIComponent(audioUrl);
-      const shotstackCallback = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}&purpose=heygen&audioUrl=${encodedAudioUrl}`;
 
       const existingVideoMeta = (video.metadata as Record<string, unknown> | null) ?? {};
       const rotationDeg = (existingVideoMeta.videoRotation as number | undefined) ?? 0;
+      if (rotationDeg !== 0) {
+        logger.info("Applying rotation to hook face video", { clipId, rotationDeg });
+      }
 
-      const renderId = await trimVideoWithShotstack(
+      const faceVideoUrl = await trimAndUploadFaceVideo(
         video.storagePath,
+        `hook-${clipId}`,
         hookDuration,
-        shotstackCallback,
-        undefined,
         rotationDeg,
       );
-      logger.info("Hook Shotstack trim submitted", { clipId, renderId, hookDuration });
+      logger.info("Hook face video trimmed", { clipId, faceVideoUrl, hookDuration });
+
+      const { lipsyncId } = await heyGenService.submitLipsync({
+        faceVideoUrl,
+        audioUrl,
+        title: clip.title ?? undefined,
+        callbackUrl: `${appUrl}/api/webhooks/heygen`,
+      });
 
       await db.repurposedClip.update({
         where: { id: clipId },
         data: {
-          opusClipId: `shotstack-trim:${renderId}`,
+          opusClipId: `heygen:${lipsyncId}`,
           status: "PROCESSING",
           isAIGenerated: false, // This is a hybrid: has original footage component
         },
       });
+      logger.info("Hook submitted to HeyGen lipsync", { clipId, lipsyncId });
     } catch (err) {
       const errDetail = err instanceof Error ? { message: err.message, name: err.name } : err;
       logger.error("Failed to process hybrid clip hook", { clipId, err: errDetail });
@@ -199,44 +207,43 @@ export async function processAiClip(clipId: string): Promise<void> {
       : 30;
     const trimDuration = audioDuration;
 
-    // 3. Use Shotstack to trim the source video to just the clip length.
-    //    Shotstack renders a short public-URL clip which we then send to HeyGen.
-    //    This avoids sending the full multi-minute source video to HeyGen
-    //    (which exceeds the $5 API credit limit at $0.0333/s).
+    // 3. Trim video with ffmpeg (bakes in rotation) + submit directly to HeyGen lipsync.
+    //    Bypasses Shotstack entirely — eliminates the scale-then-rotate zoom bug on
+    //    Samsung/portrait videos.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://contentforge-web-nine.vercel.app";
-    const encodedAudioUrl = encodeURIComponent(audioUrl);
-    const shotstackCallback = `${appUrl}/api/webhooks/shotstack?clipId=${clipId}&purpose=heygen&audioUrl=${encodedAudioUrl}`;
-
-    // Music disabled temporarily — re-enable after e2e test passes
-    // const musicUrl = await fetchMoodTrack(reelScript?.mood);
 
     // Read cached rotation (set at process time in /process/route.ts).
-    // No detection here — avoids per-clip overhead; 0 means no correction needed.
     const existingMeta = (video.metadata as Record<string, unknown> | null) ?? {};
     const rotationDeg = (existingMeta.videoRotation as number | undefined) ?? 0;
     if (rotationDeg !== 0) {
-      logger.info("Applying cached video rotation", { clipId, rotationDeg });
+      logger.info("Applying rotation to face video", { clipId, rotationDeg });
     }
 
-    const renderId = await trimVideoWithShotstack(
+    const faceVideoUrl = await trimAndUploadFaceVideo(
       video.storagePath,
+      clipId,
       trimDuration,
-      shotstackCallback,
-      undefined, // no music until R2 tracks are uploaded
       rotationDeg,
     );
-    logger.info("Shotstack trim submitted", { clipId, renderId, trimDuration, mood: reelScript?.mood ?? "motivational" });
+    logger.info("Face video trimmed", { clipId, faceVideoUrl, trimDuration });
 
-    // 4. Mark as PROCESSING — Shotstack webhook fires when trim is done,
-    //    then submits to HeyGen, then HeyGen webhook fires → Remotion render → READY
+    const { lipsyncId } = await heyGenService.submitLipsync({
+      faceVideoUrl,
+      audioUrl,
+      title: clip.title ?? undefined,
+      callbackUrl: `${appUrl}/api/webhooks/heygen`,
+    });
+
+    // 4. Mark as PROCESSING — HeyGen webhook fires when lipsync is done → Remotion render → READY
     await db.repurposedClip.update({
       where: { id: clipId },
       data: {
-        opusClipId: `shotstack-trim:${renderId}`,
+        opusClipId: `heygen:${lipsyncId}`,
         status: "PROCESSING",
         isAIGenerated: true,
       },
     });
+    logger.info("Submitted to HeyGen lipsync", { clipId, lipsyncId, trimDuration });
   } catch (err) {
     const errDetail = err instanceof Error
       ? { message: err.message, name: err.name, status: (err as any).status }

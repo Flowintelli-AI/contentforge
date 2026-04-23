@@ -343,13 +343,21 @@ export async function generateAndUploadVoiceover(
 
 /**
  * Downloads the source video, trims it to `durationSec` seconds using ffmpeg,
- * uploads the trimmed clip to R2 `face-clips/{clipId}.mp4`, and returns its
- * public URL. Falls back to `sourceVideoUrl` when ffmpeg is unavailable.
+ * bakes in any EXIF rotation so HeyGen always receives a correctly-oriented
+ * portrait clip, uploads to R2 `face-clips/{clipId}.mp4`, and returns the
+ * public URL.
+ *
+ * @param rotationDeg  EXIF/device rotation in degrees (0, 90, 180, 270).
+ *                     When non-zero the pixels are physically rotated via the
+ *                     ffmpeg `transpose` filter so the output is always
+ *                     upright — eliminating the Shotstack scale-then-rotate
+ *                     zoom bug.
  */
 export async function trimAndUploadFaceVideo(
   sourceVideoUrl: string,
   clipId: string,
   durationSec: number,
+  rotationDeg = 0,
 ): Promise<string> {
   // Resolve binary — throws if unavailable (no silent fallback; full video = expensive HeyGen bill)
   const bin = await resolveFfmpegBin();
@@ -361,19 +369,35 @@ export async function trimAndUploadFaceVideo(
 
   try {
     // Download source video to /tmp
-    console.log(`[video-trim] Downloading source video (will trim to ${trimSec}s)...`);
+    console.log(`[video-trim] Downloading source video (trim=${trimSec}s, rotation=${rotationDeg}°)...`);
     const res = await fetch(sourceVideoUrl);
     if (!res.ok || !res.body) throw new Error(`Failed to fetch source video: ${res.status}`);
     await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(inputPath));
 
-    // Trim with ffmpeg (-c copy = no re-encode, fast)
-    await execFileAsync(bin, [
-      "-i", inputPath,
-      "-t", String(trimSec),
-      "-c", "copy",
-      "-avoid_negative_ts", "make_zero",
-      "-y", outputPath,
-    ]);
+    // For rotated videos, bake in the rotation with libx264 so HeyGen receives
+    // correctly-oriented pixels. transpose=1 = 90° CW (Samsung portrait stored
+    // as landscape with rotation=90). Strip audio — HeyGen replaces it anyway.
+    const ffmpegArgs: string[] = rotationDeg !== 0
+      ? [
+          "-i", inputPath,
+          "-t", String(trimSec),
+          "-vf", transposeFilter(rotationDeg),
+          "-c:v", "libx264",
+          "-preset", "fast",
+          "-crf", "23",
+          "-an",
+          "-y", outputPath,
+        ]
+      : [
+          "-i", inputPath,
+          "-t", String(trimSec),
+          "-c:v", "copy",
+          "-an",
+          "-avoid_negative_ts", "make_zero",
+          "-y", outputPath,
+        ];
+
+    await execFileAsync(bin, ffmpegArgs);
 
     // Upload trimmed video to R2
     const key = `face-clips/${clipId}.mp4`;
@@ -385,10 +409,20 @@ export async function trimAndUploadFaceVideo(
     }));
 
     const url = `${process.env.R2_PUBLIC_URL}/${key}`;
-    console.log(`[video-trim] ✅ Trimmed to ${trimSec}s → ${url}`);
+    console.log(`[video-trim] ✅ Trimmed to ${trimSec}s (rotation=${rotationDeg}°) → ${url}`);
     return url;
   } finally {
     await Promise.allSettled([unlink(inputPath), unlink(outputPath)]);
+  }
+}
+
+/** Maps a device rotation angle to the correct ffmpeg transpose filter string. */
+function transposeFilter(rotationDeg: number): string {
+  switch (rotationDeg) {
+    case 90:  return "transpose=1"; // 90° CW (most Samsung portrait videos)
+    case 180: return "vflip,hflip";
+    case 270: return "transpose=2"; // 90° CCW
+    default:  return "transpose=1"; // fallback
   }
 }
 
