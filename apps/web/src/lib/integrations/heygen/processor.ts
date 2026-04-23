@@ -27,6 +27,45 @@ interface ReelScriptJson {
 }
 
 /**
+ * Polls DB for clonedVoiceId up to maxWaitMs (default 90s), then clones inline if still null.
+ * This avoids the race condition where AssemblyAI webhook fires before the background
+ * performVoiceClone (in /process/route.ts) has written clonedVoiceId to the DB.
+ */
+async function ensureVoiceCloned(
+  video: { id: string; storagePath: string; clonedVoiceId: string | null },
+  clipId: string,
+  maxWaitMs = 90_000,
+): Promise<string | null> {
+  if (video.clonedVoiceId) return video.clonedVoiceId;
+
+  const logger = createLogger("heygen-processor");
+  const pollIntervalMs = 10_000;
+  const polls = Math.floor(maxWaitMs / pollIntervalMs);
+
+  logger.info("clonedVoiceId null — polling DB while background clone runs", { clipId, videoId: video.id, maxWaitMs });
+  for (let i = 0; i < polls; i++) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    const updated = await db.uploadedVideo.findUnique({ where: { id: video.id }, select: { clonedVoiceId: true } });
+    if (updated?.clonedVoiceId) {
+      logger.info(`Background voice clone finished after ${(i + 1) * pollIntervalMs / 1000}s`, { clipId, voiceId: updated.clonedVoiceId });
+      return updated.clonedVoiceId;
+    }
+  }
+
+  // Background clone didn't finish — clone inline as final fallback
+  logger.info("Background clone still pending after polling — cloning inline", { clipId, videoId: video.id });
+  try {
+    const newVoiceId = await cloneVoiceFromVideo(video.storagePath, video.id);
+    await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } });
+    logger.info("Inline voice clone succeeded", { clipId, voiceId: newVoiceId });
+    return newVoiceId;
+  } catch (cloneErr) {
+    logger.warn("Inline voice clone also failed, will use fallback voice", { clipId, cloneErr });
+    return null;
+  }
+}
+
+/**
  * Processes a GENERATING_AI clip through the full Type 2 pipeline:
  * ElevenLabs TTS → R2 upload → HeyGen lipsync submit → DB update
  *
@@ -66,17 +105,10 @@ export async function processAiClip(clipId: string): Promise<void> {
       return;
     }
 
-    // If voice clone hasn't finished yet (race with AssemblyAI webhook), clone inline now.
+    // Wait for background voice clone to finish (or clone inline as fallback)
     if (!video.clonedVoiceId) {
-      logger.info("clonedVoiceId null — cloning voice inline before hook TTS", { clipId, videoId: video.id });
-      try {
-        const newVoiceId = await cloneVoiceFromVideo(video.storagePath, video.id);
-        await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } });
-        video = { ...video, clonedVoiceId: newVoiceId };
-        logger.info("Inline voice clone succeeded", { clipId, voiceId: newVoiceId });
-      } catch (cloneErr) {
-        logger.warn("Inline voice clone failed, will use fallback voice", { clipId, cloneErr });
-      }
+      const clonedId = await ensureVoiceCloned(video, clipId);
+      if (clonedId) video = { ...video, clonedVoiceId: clonedId };
     }
 
     const voiceId = video.clonedVoiceId ?? process.env.ELEVENLABS_VOICE_ID;
@@ -152,17 +184,10 @@ export async function processAiClip(clipId: string): Promise<void> {
     return;
   }
 
-  // If voice clone hasn't finished yet (race with AssemblyAI webhook), clone inline now.
+  // Wait for background voice clone to finish (or clone inline as fallback)
   if (!video.clonedVoiceId) {
-    logger.info("clonedVoiceId null — cloning voice inline before Type 2 TTS", { clipId, videoId: video.id });
-    try {
-      const newVoiceId = await cloneVoiceFromVideo(video.storagePath, video.id);
-      await db.uploadedVideo.update({ where: { id: video.id }, data: { clonedVoiceId: newVoiceId } });
-      video = { ...video, clonedVoiceId: newVoiceId };
-      logger.info("Inline voice clone succeeded", { clipId, voiceId: newVoiceId });
-    } catch (cloneErr) {
-      logger.warn("Inline voice clone failed, will use fallback voice", { clipId, cloneErr });
-    }
+    const clonedId = await ensureVoiceCloned(video, clipId);
+    if (clonedId) video = { ...video, clonedVoiceId: clonedId };
   }
 
   const voiceId = video.clonedVoiceId ?? process.env.ELEVENLABS_VOICE_ID;
