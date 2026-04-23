@@ -2,9 +2,9 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@contentforge/db";
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
-import { detectVideoRotation } from "@/lib/video-processing";
+import { detectVideoRotation, cloneVoiceFromVideo } from "@/lib/video-processing";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(
   _req: Request,
@@ -114,43 +114,21 @@ async function detectAndCacheRotation(
     console.warn(`[process] rotation detection failed for video=${videoId} (non-fatal):`, err);
   }
 }
-// ElevenLabs IVC using files_url. This avoids byte-range truncation which
-// corrupts the MP4 container (moov atom is at the end of phone recordings).
-// Non-fatal: any failure is logged, webhook falls back to ELEVENLABS_VOICE_ID.
+// Voice clone using ffmpeg to extract a 30s MP3 sample and upload to ElevenLabs IVC.
+// Non-fatal: any failure is logged, processor falls back to ELEVENLABS_VOICE_ID.
 async function performVoiceClone(
   videoId: string,
   storagePath: string,
-  elevenKey: string
+  _elevenKey: string  // kept for call-site compatibility; cloneVoiceFromVideo reads env directly
 ) {
   try {
-    console.log(`[clone-voice] Submitting R2 URL for video=${videoId}`);
-
-    const form = new FormData();
-    form.append("name", `Speaker-${videoId.slice(-8)}`);
-    form.append("description", "Auto-cloned via ContentForge");
-    form.append("remove_background_noise", "true");
-    // Pass the public R2 URL directly — ElevenLabs fetches the complete file,
-    // avoiding the corrupted-container problem from byte-range slicing.
-    // files_url must be a JSON array per ElevenLabs IVC API spec.
-    form.append("files_url", JSON.stringify([storagePath]));
-
-    const cloneRes = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-      method: "POST",
-      headers: { "xi-api-key": elevenKey },
-      body: form,
+    console.log(`[clone-voice] Starting ffmpeg voice clone for video=${videoId}`);
+    const voice_id = await cloneVoiceFromVideo(storagePath, videoId);
+    await db.uploadedVideo.update({
+      where: { id: videoId },
+      data: { clonedVoiceId: voice_id },
     });
-
-    if (cloneRes.ok) {
-      const { voice_id } = (await cloneRes.json()) as { voice_id: string };
-      await db.uploadedVideo.update({
-        where: { id: videoId },
-        data: { clonedVoiceId: voice_id },
-      });
-      console.log(`[clone-voice] ✅ Cloned voice_id=${voice_id} for video=${videoId}`);
-    } else {
-      const errText = await cloneRes.text();
-      console.warn(`[clone-voice] ElevenLabs rejected sample for video=${videoId}: ${errText}`);
-    }
+    console.log(`[clone-voice] ✅ Cloned voice_id=${voice_id} for video=${videoId}`);
   } catch (err) {
     console.warn(`[clone-voice] Failed (non-fatal) for video=${videoId}:`, err);
   }
