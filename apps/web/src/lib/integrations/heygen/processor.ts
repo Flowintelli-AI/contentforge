@@ -89,16 +89,12 @@ export async function processAiClip(clipId: string): Promise<void> {
     logger.info("Generating hook voiceover (hybrid Type 1+hook)", { clipId, hookText, voiceId });
 
     try {
-      const { url: audioUrl, wordTimings: hookWordTimings } = await generateAndUploadVoiceover(
+      const { url: audioUrl, wordTimings: hookWordTimings, audioDurationSec: hookDuration } = await generateAndUploadVoiceover(
         hookText,
         voiceId,
         `hook-${clipId}`,
       );
-      logger.info("Hook voiceover ready", { clipId, audioUrl, words: hookWordTimings.length });
-
-      const hookDuration = hookWordTimings.length > 0
-        ? hookWordTimings[hookWordTimings.length - 1].end
-        : 3;
+      logger.info("Hook voiceover ready", { clipId, audioUrl, words: hookWordTimings.length, hookDuration });
 
       // Store hook word timings; original word timings are in reelScript.originalWordTimings
       const existingMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
@@ -185,12 +181,12 @@ export async function processAiClip(clipId: string): Promise<void> {
 
   try {
     // 1. Generate TTS audio and upload to R2
-    const { url: audioUrl, wordTimings } = await generateAndUploadVoiceover(
+    const { url: audioUrl, wordTimings, audioDurationSec } = await generateAndUploadVoiceover(
       script,
       voiceId,
       `ai-clip-${clipId}`,
     );
-    logger.info("Voiceover ready", { clipId, audioUrl, wordTimings: wordTimings.length });
+    logger.info("Voiceover ready", { clipId, audioUrl, wordTimings: wordTimings.length, audioDurationSec });
 
     // Persist word timings so the HeyGen webhook can pass them to Remotion for captions.
     // ElevenLabs timings are already in seconds, relative to the TTS audio start — perfect for Remotion.
@@ -200,12 +196,8 @@ export async function processAiClip(clipId: string): Promise<void> {
       data: { metadata: { ...existingClipMeta, wordTimings } },
     });
 
-    // 2. Trim video to exact audio duration so they end at the same time.
-    // Shotstack accepts decimal seconds. HeyGen requires <15% duration diff — 0% is ideal.
-    const audioDuration = wordTimings.length > 0
-      ? wordTimings[wordTimings.length - 1].end
-      : 30;
-    const trimDuration = audioDuration;
+    // 2. Trim face video to exact audio duration — identical length, 0% diff for HeyGen.
+    const trimDuration = audioDurationSec;
 
     // 3. Trim video with ffmpeg (bakes in rotation) + submit directly to HeyGen lipsync.
     //    Bypasses Shotstack entirely — eliminates the scale-then-rotate zoom bug on

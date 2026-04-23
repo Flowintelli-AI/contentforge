@@ -113,6 +113,8 @@ export interface WordTiming {
 export interface VoiceoverResult {
   url: string;
   wordTimings: WordTiming[];
+  /** Exact audio duration in seconds — use this for face video trim, not wordTimings.at(-1).end */
+  audioDurationSec: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -334,9 +336,13 @@ export async function generateAndUploadVoiceover(
     data.alignment.character_start_times_seconds,
     data.alignment.character_end_times_seconds
   );
+  // Use the raw last character end time as the authoritative audio duration.
+  // This is what ElevenLabs actually rendered — identical to what HeyGen will measure.
+  const endTimes = data.alignment.character_end_times_seconds;
+  const audioDurationSec = endTimes.length > 0 ? endTimes[endTimes.length - 1] : 0;
 
-  console.log(`[voiceover] ✅ Uploaded: ${url} (${wordTimings.length} words timed)`);
-  return { url, wordTimings };
+  console.log(`[voiceover] ✅ Uploaded: ${url} (${wordTimings.length} words, ${audioDurationSec.toFixed(3)}s)`);
+  return { url, wordTimings, audioDurationSec };
 }
 
 // ─── Face-video trimmer ───────────────────────────────────────────────────────
