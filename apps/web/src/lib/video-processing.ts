@@ -6,6 +6,7 @@ import { createReadStream, createWriteStream, existsSync } from "fs";
 import { unlink, chmod } from "fs/promises";
 import { pipeline } from "stream/promises";
 import * as path from "path";
+import { db } from "@contentforge/db";
 
 // Path where we cache a downloaded ffmpeg binary in /tmp (persists across warm invocations)
 const TMP_FFMPEG = "/tmp/ffmpeg-bin";

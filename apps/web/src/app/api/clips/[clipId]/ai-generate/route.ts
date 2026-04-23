@@ -5,8 +5,19 @@ import { elevenLabsService } from "@/lib/integrations/elevenlabs/service";
 
 export const maxDuration = 300;
 
-// Fallback voice when no clone exists (ElevenLabs "Rachel")
-const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+// ── DEPRECATED PIPELINE ──────────────────────────────────────────────────────
+// This route (Shotstack + Reap) has been superseded by the new pipeline:
+//   AssemblyAI webhook → processAiClip → HeyGen → Remotion Lambda
+// Return 200 immediately so stale browser JS doesn't cause double-renders.
+export async function POST(
+  _req: Request,
+  { params }: { params: { clipId: string } }
+) {
+  console.log(`[ai-generate] DEPRECATED — ignoring request for clipId=${params.clipId}`);
+  return NextResponse.json({ ok: true, deprecated: true });
+}
+
+// ── Legacy helpers kept to avoid build errors; never called ──────────────────
 
 const r2 = new S3Client({
   region: "auto",
@@ -98,7 +109,7 @@ async function submitShotstackCompose(
   return data.response.id;
 }
 
-export async function POST(
+async function _legacyPost(
   _req: Request,
   { params }: { params: { clipId: string } }
 ) {
