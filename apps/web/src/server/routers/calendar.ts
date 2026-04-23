@@ -27,6 +27,8 @@ export const calendarRouter = createTRPCRouter({
         },
         include: {
           script: { select: { title: true } },
+          clip: { select: { id: true, title: true, thumbnailUrl: true, storagePath: true } },
+          scheduledPost: { select: { status: true, postUrl: true } },
         },
         orderBy: { scheduledFor: "asc" },
       });
@@ -97,6 +99,39 @@ export const calendarRouter = createTRPCRouter({
   deleteItem: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      return ctx.db.contentCalendarItem.delete({ where: { id: input.id } });
+    }),
+
+  reschedule: protectedProcedure
+    .input(z.object({ id: z.string(), scheduledFor: z.date() }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      const profile = await ctx.db.creatorProfile.findUnique({ where: { userId: user.id } });
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND" });
+      // Verify ownership
+      const item = await ctx.db.contentCalendarItem.findFirst({
+        where: { id: input.id, creatorId: profile.id },
+      });
+      if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+      return ctx.db.contentCalendarItem.update({
+        where: { id: input.id },
+        data: { scheduledFor: input.scheduledFor },
+      });
+    }),
+
+  cancel: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      const profile = await ctx.db.creatorProfile.findUnique({ where: { userId: user.id } });
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND" });
+      const item = await ctx.db.contentCalendarItem.findFirst({
+        where: { id: input.id, creatorId: profile.id },
+      });
+      if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+      // Delete cascades to ScheduledPost
       return ctx.db.contentCalendarItem.delete({ where: { id: input.id } });
     }),
 });
