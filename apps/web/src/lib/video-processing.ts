@@ -362,7 +362,9 @@ export async function trimAndUploadFaceVideo(
   // Resolve binary — throws if unavailable (no silent fallback; full video = expensive HeyGen bill)
   const bin = await resolveFfmpegBin();
 
-  const trimSec = Math.ceil(durationSec) + 2; // slight buffer
+  // Trim to exact audio duration — HeyGen rejects if video/audio differ by >15%.
+  // No buffer: face video must precisely match the TTS audio length.
+  const trimSec = durationSec;
   const tmpDir = "/tmp";
   const inputPath = path.join(tmpDir, `${clipId}-input.mp4`);
   const outputPath = path.join(tmpDir, `${clipId}-trimmed.mp4`);
