@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { db } from "@contentforge/db";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
+import { thumbnailService } from "@/lib/integrations/thumbnail/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
 
 export const maxDuration = 300;
@@ -145,10 +146,23 @@ export async function POST(req: Request) {
               totalDurationSec,
             })
             .then(async (outputUrl) => {
+              // Extract post copy + hashtags from reelScript and save alongside READY status
+              const caption = (reelScriptData.caption as string | undefined) ?? null;
+              const hashtags = Array.isArray(reelScriptData.hashtags)
+                ? (reelScriptData.hashtags as string[])
+                : [];
               await db.repurposedClip.update({
                 where: { id: lipsyncClip.id },
-                data: { storagePath: outputUrl, status: 'READY' },
+                data: {
+                  storagePath: outputUrl,
+                  status: 'READY',
+                  postCopy: caption,
+                  hashtags,
+                },
               });
+              // Trigger thumbnail extraction non-blocking (fires inside the waitUntil scope)
+              thumbnailService.extractAndSave(lipsyncClip.id, outputUrl)
+                .catch(err => logger.error('Thumbnail extraction failed (hybrid)', { clipId: lipsyncClip.id, error: String(err) }));
               logger.info("Hybrid clip ready", { clipId: lipsyncClip.id, outputUrl });
             })
             .catch(async (err) => {
@@ -181,10 +195,23 @@ export async function POST(req: Request) {
             totalDurationSec: durationSec,
           })
           .then(async (outputUrl) => {
+            // Extract post copy + hashtags from reelScript and save alongside READY status
+            const caption = (reelScriptData.caption as string | undefined) ?? null;
+            const hashtags = Array.isArray(reelScriptData.hashtags)
+              ? (reelScriptData.hashtags as string[])
+              : [];
             await db.repurposedClip.update({
               where: { id: lipsyncClip.id },
-              data: { storagePath: outputUrl, status: 'READY' },
+              data: {
+                storagePath: outputUrl,
+                status: 'READY',
+                postCopy: caption,
+                hashtags,
+              },
             });
+            // Trigger thumbnail extraction non-blocking (fires inside the waitUntil scope)
+            thumbnailService.extractAndSave(lipsyncClip.id, outputUrl)
+              .catch(err => logger.error('Thumbnail extraction failed (type2)', { clipId: lipsyncClip.id, error: String(err) }));
             logger.info("Type 2 clip ready", { clipId: lipsyncClip.id, outputUrl });
           })
           .catch(async (err) => {

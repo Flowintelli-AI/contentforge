@@ -1,0 +1,115 @@
+{
+  "format": "tutorial",
+  "caption": "73% of teams waste hours on manual tasks. Here’s how to reclaim that time. Start automating today! #Flowintelli #AIAutomation #Automation",
+  "slides": [
+    {
+      "type": "hook",
+      "position": 1,
+      "headline": "Cut Manual Data Entry by 73%",
+      "subtext": "Transformative automation can reclaim your team's time.",
+      "hook_stat": "73%",
+      "swipe_invite": "Swipe to see how 👉",
+      "image_query": "data entry automation",
+      "highlight_word": "automation"
+    },
+    {
+      "type": "example",
+      "position": 2,
+      "headline": "Real-World Success Story",
+      "body": "A logistics client spent 12 hours daily on data entry. We automated it!",
+      "bullets": [
+        "4 team members involved",
+        "3 hours wasted daily",
+        "15-year-old carrier portal"
+      ],
+      "image_query": "team collaboration office",
+      "highlight_word": "data"
+    },
+    {
+      "type": "example",
+      "position": 3,
+      "headline": "The Automation Process",
+      "body": "We built an automation that cut data entry time drastically.",
+      "bullets": [
+        "Monitored email for shipments",
+        "Parsed CSV files automatically",
+        "Validated data against rules"
+      ],
+      "image_query": "automation workflow diagram",
+      "highlight_word": "process"
+    },
+    {
+      "type": "diagram",
+      "position": 4,
+      "headline": "Impactful Results",
+      "stats": [
+        {
+          "value": "73%",
+          "label": "Manual data entry drop"
+        },
+        {
+          "value": "0.1%",
+          "label": "Error rate drop"
+        },
+        {
+          "value": "11h",
+          "label": "Time reclaimed daily"
+        },
+        {
+          "value": "2w",
+          "label": "ROI achieved"
+        }
+      ],
+      "highlight_word": "results"
+    },
+    {
+      "type": "diagram",
+      "position": 5,
+      "headline": "Automation Steps",
+      "steps": [
+        "Identify the trigger",
+        "Map the happy path",
+        "Define exception rules",
+        "Build the automation"
+      ],
+      "highlight_word": "steps"
+    },
+    {
+      "type": "practical",
+      "position": 6,
+      "headline": "Key Insight",
+      "body": "Automation transforms predictable tasks, freeing your team for strategic work.",
+      "highlight_word": "transform"
+    },
+    {
+      "type": "practical",
+      "position": 7,
+      "headline": "Start Automating Now",
+      "body": "Identify a repetitive task that takes up team time. Begin automation today!",
+      "highlight_word": "automating"
+    },
+    {
+      "type": "practical",
+      "position": 8,
+      "headline": "Refine Your Processes",
+      "body": "Map out the predictable tasks and define human exceptions. Improve continuously!",
+      "highlight_word": "processes"
+    },
+    {
+      "type": "practical",
+      "position": 9,
+      "headline": "Recap: Transformative Automation",
+      "body": "Reclaim hours by automating predictable tasks. Start today for immediate results!",
+      "teaser": "Save this. The next slide shows exactly what to do.",
+      "highlight_word": "reclaim"
+    },
+    {
+      "type": "cta",
+      "position": 10,
+      "headline": "Ready to Automate?",
+      "action": "the full automation blueprint",
+      "cta_comment_prompt": "AUTOMATE",
+      "highlight_word": "automate"
+    }
+  ]
+}

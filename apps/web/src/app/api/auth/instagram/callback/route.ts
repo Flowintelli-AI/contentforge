@@ -119,6 +119,25 @@ export async function GET(req: NextRequest) {
       },
     });
 
+    // Phase 2: also upsert SocialAccount so it can be used for scheduling
+    await db.socialAccount.upsert({
+      where: { creatorId_platform: { creatorId: creatorProfile.id, platform: "INSTAGRAM" } },
+      create: {
+        creatorId: creatorProfile.id,
+        platform: "INSTAGRAM",
+        handle: profile.username ?? profile.id!,
+        accessToken: longToken,
+        tokenExpiry,
+        isActive: true,
+      },
+      update: {
+        handle: profile.username ?? profile.id!,
+        accessToken: longToken,
+        tokenExpiry,
+        isActive: true,
+      },
+    });
+
     return redirect("instagram=connected");
   } catch (err) {
     console.error("[instagram/oauth] callback error:", err);

@@ -2,6 +2,7 @@ import { createTRPCRouter, protectedProcedure } from "@/server/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { del } from "@vercel/blob";
+import { createReelsContainer } from "@/lib/integrations/instagram/publisher";
 
 async function getProfile(ctx: { userId: string; db: typeof import("@contentforge/db").db }) {
   const user = await ctx.db.user.findUnique({ where: { clerkId: ctx.userId } });
@@ -81,5 +82,96 @@ export const videosRouter = createTRPCRouter({
         where: { id: input.id, creatorId: profile.id },
         data: { status: input.status },
       });
+    }),
+
+  /** List all READY clips for the creator (across all videos) — for the publishing UI */
+  listReadyClips: protectedProcedure.query(async ({ ctx }) => {
+    const profile = await getProfile(ctx);
+    return ctx.db.repurposedClip.findMany({
+      where: { video: { creatorId: profile.id }, status: "READY" },
+      include: {
+        video: { select: { title: true } },
+        calendarItems: {
+          orderBy: { scheduledFor: "desc" },
+          take: 1,
+          include: { scheduledPost: { select: { status: true, postizPostId: true } } },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }),
+
+  /** Schedule a READY clip to Instagram */
+  scheduleClip: protectedProcedure
+    .input(
+      z.object({
+        clipId: z.string(),
+        caption: z.string().max(2200),
+        hashtags: z.array(z.string()).max(30),
+        scheduledFor: z.date(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const profile = await getProfile(ctx);
+
+      // Verify clip is READY and belongs to this creator
+      const clip = await ctx.db.repurposedClip.findFirst({
+        where: { id: input.clipId, video: { creatorId: profile.id }, status: "READY" },
+      });
+      if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: "Clip not found or not READY" });
+      if (!clip.storagePath) throw new TRPCError({ code: "BAD_REQUEST", message: "Clip has no video URL" });
+
+      // Fetch Instagram connection
+      const igConn = await ctx.db.igConnection.findUnique({ where: { creatorId: profile.id } });
+      if (!igConn) throw new TRPCError({ code: "BAD_REQUEST", message: "Instagram not connected" });
+
+      // Fetch SocialAccount record (for FK on ScheduledPost)
+      const socialAccount = await ctx.db.socialAccount.findUnique({
+        where: { creatorId_platform: { creatorId: profile.id, platform: "INSTAGRAM" } },
+      });
+      if (!socialAccount) throw new TRPCError({ code: "BAD_REQUEST", message: "Instagram social account not found" });
+
+      // Build full caption
+      const fullCaption = [
+        input.caption.trim(),
+        input.hashtags.length > 0 ? "\n\n" + input.hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ") : "",
+      ]
+        .join("")
+        .trim();
+
+      // Create Instagram Reels container (scheduled)
+      const containerId = await createReelsContainer(
+        igConn.accessToken,
+        igConn.igUserId,
+        clip.storagePath,
+        fullCaption,
+        input.scheduledFor.getTime()
+      );
+
+      // Persist to DB
+      const calendarItem = await ctx.db.contentCalendarItem.create({
+        data: {
+          creatorId: profile.id,
+          clipId: clip.id,
+          title: clip.title ?? "Instagram Reel",
+          scheduledFor: input.scheduledFor,
+          platform: "INSTAGRAM",
+          status: "SCHEDULED",
+          scheduledPost: {
+            create: {
+              socialAccountId: socialAccount.id,
+              postizPostId: containerId,
+              status: "SCHEDULED",
+            },
+          },
+        },
+        include: { scheduledPost: true },
+      });
+
+      return {
+        calendarItemId: calendarItem.id,
+        containerId,
+        scheduledFor: input.scheduledFor,
+      };
     }),
 });
