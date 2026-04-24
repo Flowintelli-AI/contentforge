@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "cd packages/db && npx prisma generate",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
