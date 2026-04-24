@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _client: OpenAI | null = null;
+const getClient = () => _client ?? (_client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
 
 export interface ScriptSection {
   hook: string;
@@ -72,7 +73,7 @@ ${niche ? `Creator niche: ${niche}` : ""}
 Write the full structured script now.`;
 
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },

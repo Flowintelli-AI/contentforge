@@ -7,7 +7,8 @@ import { remotionRenderService } from "@/lib/integrations/remotion/service";
 
 export const maxDuration = 300;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+const getOpenAI = () => _openai ?? (_openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
 
 interface AssemblyAIWord {
   start: number; // ms
@@ -240,7 +241,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   ]
 }`;
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: "gpt-4o",
     temperature: 0.3,
     messages: [

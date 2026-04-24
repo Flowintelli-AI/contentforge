@@ -60,7 +60,8 @@ async function resolveFfmpegBin(): Promise<string> {
 
 const execFileAsync = promisify(execFile);
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+const getOpenAI = () => _openai ?? (_openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
 
 const r2 = new S3Client({
   region: "auto",
@@ -610,7 +611,7 @@ export async function selectBestSegments(
       ? segments.filter((_, i) => i % Math.ceil(segments.length / MAX_SEGMENTS) === 0)
       : segments;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAI().chat.completions.create({
     model: "gpt-4o",
     response_format: { type: "json_object" },
     messages: [

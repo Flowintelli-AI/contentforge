@@ -17,6 +17,7 @@
     "@contentforge/ai": "*",
     "@contentforge/db": "*",
     "@contentforge/integrations": "*",
+    "@dnd-kit/core": "^6.3.1",
     "@prisma/client": "^5.15.0",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
