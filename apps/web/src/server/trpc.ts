@@ -17,11 +17,25 @@ export async function createTRPCContext() {
       (sessionClaims?.firstName as string | undefined) ??
       email.split("@")[0];
 
-    await db.user.upsert({
-      where: { clerkId: userId },
-      create: { clerkId: userId, email, name },
-      update: {},
-    });
+    try {
+      await db.user.upsert({
+        where: { clerkId: userId },
+        create: { clerkId: userId, email, name },
+        update: {},
+      });
+    } catch (e: any) {
+      // P2002 = unique constraint — email already exists with a different clerkId
+      // (can happen after DB migration). Re-claim the record with the current clerkId.
+      if (e?.code === "P2002") {
+        try {
+          await db.user.update({ where: { email }, data: { clerkId: userId } });
+        } catch (e2) {
+          console.error("[trpc] failed to re-claim user by email:", e2);
+        }
+      } else {
+        console.error("[trpc] user upsert error:", e?.message);
+      }
+    }
   }
 
   return { userId, db };

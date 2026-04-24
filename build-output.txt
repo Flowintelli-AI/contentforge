@@ -1,0 +1,41 @@
+
+> @contentforge/web@0.1.0 build
+> next build
+
+ ΓÜá Invalid next.config.mjs options detected: 
+ ΓÜá     Unrecognized key(s) in object: 'serverExternalPackages', 'outputFileTracingIncludes'
+ ΓÜá See more info here: https://nextjs.org/docs/messages/invalid-next-config
+  Γû▓ Next.js 14.2.35
+  - Environments: .env.production.local, .env.local, .env.production
+
+   Creating an optimized production build ...
+ Γ£ô Compiled successfully
+   Skipping validation of types
+   Skipping linting
+   Collecting page data ...
+[instagram] INSTAGRAM_APP_SECRET not set ΓÇö running in mock mode
+tl [Error]: The OPENAI_API_KEY environment variable is missing or empty; either provide it, or instantiate the OpenAI client with an apiKey option, like new OpenAI({ apiKey: 'My API Key' }).
+    at new d0 (C:\Users\hugar\contentforge\apps\web\.next\server\chunks\3588.js:5:30651)
+    at 18709 (C:\Users\hugar\contentforge\apps\web\.next\server\app\api\trpc\[trpc]\route.js:8:70730)
+    at t (C:\Users\hugar\contentforge\apps\web\.next\server\webpack-runtime.js:1:128)
+    at t (C:\Users\hugar\contentforge\apps\web\.next\server\app\api\trpc\[trpc]\route.js:85:114509)
+    at C:\Users\hugar\contentforge\apps\web\.next\server\app\api\trpc\[trpc]\route.js:85:114556
+    at t.X (C:\Users\hugar\contentforge\apps\web\.next\server\webpack-runtime.js:1:1206)
+    at C:\Users\hugar\contentforge\apps\web\.next\server\app\api\trpc\[trpc]\route.js:85:114522
+    at Object.<anonymous> (C:\Users\hugar\contentforge\apps\web\.next\server\app\api\trpc\[trpc]\route.js:85:114584)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+
+> Build error occurred
+Error: Failed to collect page data for /api/trpc/[trpc]
+    at C:\Users\hugar\contentforge\node_modules\next\dist\build\utils.js:1269:15
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  type: 'Error'
+}
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path C:\Users\hugar\contentforge\apps\web
+npm error workspace @contentforge/web@0.1.0
+npm error location C:\Users\hugar\contentforge\apps\web
+npm error command failed
+npm error command C:\windows\system32\cmd.exe /d /s /c next build

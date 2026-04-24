@@ -18,7 +18,7 @@ function redirect(param: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId } = auth();
+  const { userId } = await auth();
   if (!userId) return NextResponse.redirect(`${APP_URL}/sign-in`);
 
   const params = req.nextUrl.searchParams;

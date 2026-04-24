@@ -1,6 +1,3 @@
-// ContentForge – Prisma Schema
-// Stack: PostgreSQL via Supabase / Neon
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,9 +7,444 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─────────────────────────────────────────────
-// ENUMS
-// ─────────────────────────────────────────────
+model User {
+  id             String          @id @default(cuid())
+  clerkId        String          @unique
+  email          String          @unique
+  name           String
+  avatarUrl      String?
+  role           Role            @default(CREATOR)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organizationId String?
+  reviewActions  AdminReview[]
+  auditLogs      AuditLog[]
+  creatorProfile CreatorProfile?
+  organization   Organization?   @relation(fields: [organizationId], references: [id])
+
+  @@index([clerkId])
+  @@index([email])
+}
+
+model Organization {
+  id             String          @id @default(cuid())
+  name           String
+  slug           String          @unique
+  logoUrl        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  billingRecords BillingRecord[]
+  subscriptions  Subscription[]
+  users          User[]
+}
+
+model CreatorProfile {
+  id              String                @id @default(cuid())
+  userId          String                @unique
+  displayName     String
+  bio             String?
+  timezone        String                @default("UTC")
+  postingGoal     Int                   @default(30)
+  onboardingDone  Boolean               @default(false)
+  consentAiVoice  Boolean               @default(false)
+  consentAiAvatar Boolean               @default(false)
+  voiceCloneId    String?
+  avatarId        String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  automations     Automation[]
+  blogPosts       BlogPost[]
+  contentCalendar ContentCalendarItem[]
+  ideas           ContentIdea[]
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  igConnection    IgConnection?
+  igSubscribers   IgSubscriber[]
+  influencers     InfluencerOnCreator[]
+  niches          NicheOnCreator[]
+  socialAccounts  SocialAccount[]
+  videos          UploadedVideo[]
+}
+
+model Niche {
+  id          String           @id @default(cuid())
+  name        String           @unique
+  slug        String           @unique
+  description String?
+  iconUrl     String?
+  influencers Influencer[]
+  creators    NicheOnCreator[]
+  trends      TrendInsight[]
+}
+
+model NicheOnCreator {
+  creatorId String
+  nicheId   String
+  isPrimary Boolean        @default(false)
+  creator   CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  niche     Niche          @relation(fields: [nicheId], references: [id])
+
+  @@id([creatorId, nicheId])
+}
+
+model Influencer {
+  id            String                @id @default(cuid())
+  name          String
+  handle        String
+  platform      Platform
+  profileUrl    String
+  avatarUrl     String?
+  followerCount Int?
+  nicheId       String?
+  analysisData  Json?
+  lastAnalyzed  DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  niche         Niche?                @relation(fields: [nicheId], references: [id])
+  creators      InfluencerOnCreator[]
+}
+
+model InfluencerOnCreator {
+  creatorId    String
+  influencerId String
+  addedAt      DateTime       @default(now())
+  creator      CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  influencer   Influencer     @relation(fields: [influencerId], references: [id])
+
+  @@id([creatorId, influencerId])
+}
+
+model TrendInsight {
+  id        String   @id @default(cuid())
+  nicheId   String
+  title     String
+  summary   String
+  source    String?
+  rawData   Json?
+  score     Float    @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  niche     Niche    @relation(fields: [nicheId], references: [id])
+}
+
+model ContentIdea {
+  id          String             @id @default(cuid())
+  creatorId   String
+  rawIdea     String
+  refinedIdea String?
+  status      IdeaStatus         @default(DRAFT)
+  pillarType  ContentPillarType?
+  tags        String[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  adminReview AdminReview?
+  creator     CreatorProfile     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  scripts     Script[]
+
+  @@index([creatorId, status])
+}
+
+model Script {
+  id                String                @id @default(cuid())
+  ideaId            String
+  title             String
+  hook              String
+  painPoint         String?
+  authority         String?
+  solution          String
+  callToAction      String
+  fullScript        String
+  status            ScriptStatus          @default(DRAFT)
+  platform          Platform?
+  wordCount         Int?
+  estimatedDuration Int?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  adminReview       AdminReview?
+  calendarItems     ContentCalendarItem[]
+  clips             RepurposedClip[]
+  idea              ContentIdea           @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  versions          ScriptVersion[]
+
+  @@index([ideaId, status])
+}
+
+model ScriptVersion {
+  id        String   @id @default(cuid())
+  scriptId  String
+  version   Int
+  snapshot  Json
+  editedBy  String?
+  note      String?
+  createdAt DateTime @default(now())
+  script    Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+}
+
+model UploadedVideo {
+  id                String           @id @default(cuid())
+  creatorId         String
+  title             String
+  description       String?
+  storagePath       String
+  duration          Int?
+  sizeBytes         BigInt?
+  mimeType          String?
+  status            VideoStatus      @default(UPLOADING)
+  transcript        String?
+  metadata          Json?
+  clonedVoiceId     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  submagicProjectId String?
+  clips             RepurposedClip[]
+  creator           CreatorProfile   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+model RepurposedClip {
+  id                  String                @id @default(cuid())
+  videoId             String
+  scriptId            String?
+  title               String
+  storagePath         String?
+  duration            Int?
+  startTime           Float?
+  endTime             Float?
+  status              ClipStatus            @default(PENDING)
+  opusClipId          String?
+  captions            String?
+  hashtags            String[]
+  postCopy            String?
+  platform            Platform?
+  metadata            Json?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  thumbnailUrl        String?
+  thumbnailCandidates String[]              @default([])
+  calendarItems       ContentCalendarItem[]
+  script              Script?               @relation(fields: [scriptId], references: [id])
+  video               UploadedVideo         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
+model SocialAccount {
+  id              String          @id @default(cuid())
+  creatorId       String
+  platform        Platform
+  handle          String
+  accessToken     String?
+  refreshToken    String?
+  tokenExpiry     DateTime?
+  postizAccountId String?
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  scheduledPosts  ScheduledPost[]
+  creator         CreatorProfile  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, platform])
+}
+
+model ContentCalendarItem {
+  id            String             @id @default(cuid())
+  creatorId     String
+  scriptId      String?
+  clipId        String?
+  title         String
+  scheduledFor  DateTime
+  platform      Platform
+  pillarType    ContentPillarType?
+  notes         String?
+  status        PostStatus         @default(DRAFT)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  clip          RepurposedClip?    @relation(fields: [clipId], references: [id])
+  creator       CreatorProfile     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  script        Script?            @relation(fields: [scriptId], references: [id])
+  scheduledPost ScheduledPost?
+
+  @@index([creatorId, scheduledFor])
+}
+
+model ScheduledPost {
+  id              String              @id @default(cuid())
+  calendarItemId  String              @unique
+  socialAccountId String
+  postizPostId    String?
+  status          PostStatus          @default(SCHEDULED)
+  publishedAt     DateTime?
+  failureReason   String?
+  postUrl         String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  calendarItem    ContentCalendarItem @relation(fields: [calendarItemId], references: [id])
+  socialAccount   SocialAccount       @relation(fields: [socialAccountId], references: [id])
+}
+
+model Automation {
+  id             String                @id @default(cuid())
+  creatorId      String
+  name           String
+  isActive       Boolean               @default(true)
+  platform       Platform
+  triggerType    AutomationTriggerType
+  triggerKeyword String?
+  postUrl        String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  creator        CreatorProfile        @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  actions        AutomationAction[]
+  events         AutomationEvent[]
+}
+
+model AutomationAction {
+  id           String               @id @default(cuid())
+  automationId String
+  order        Int
+  actionType   AutomationActionType
+  template     String
+  delaySeconds Int?                 @default(0)
+  metadata     Json?
+  automation   Automation           @relation(fields: [automationId], references: [id], onDelete: Cascade)
+}
+
+model IgConnection {
+  id            String         @id @default(cuid())
+  creatorId     String         @unique
+  igUserId      String
+  igUsername    String
+  pageId        String?
+  accessToken   String
+  tokenExpiry   DateTime?
+  webhookActive Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  creator       CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+model IgSubscriber {
+  id         String            @id @default(cuid())
+  creatorId  String
+  igUserId   String
+  igUsername String?
+  firstName  String?
+  lastName   String?
+  tags       String[]          @default([])
+  source     String
+  optedInAt  DateTime          @default(now())
+  lastSeenAt DateTime          @default(now())
+  events     AutomationEvent[]
+  creator    CreatorProfile    @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, igUserId])
+  @@index([creatorId])
+}
+
+model AutomationEvent {
+  id           String        @id @default(cuid())
+  automationId String?
+  subscriberId String?
+  eventType    String
+  keyword      String?
+  commentId    String?
+  messageId    String?
+  status       String        @default("SENT")
+  errorMsg     String?
+  createdAt    DateTime      @default(now())
+  automation   Automation?   @relation(fields: [automationId], references: [id])
+  subscriber   IgSubscriber? @relation(fields: [subscriberId], references: [id])
+
+  @@index([automationId])
+  @@index([subscriberId])
+}
+
+model AiVideoJob {
+  id          String   @id @default(cuid())
+  creatorId   String
+  scriptId    String?
+  heygenJobId String?
+  status      String   @default("pending")
+  outputUrl   String?
+  errorMsg    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BlogPost {
+  id              String         @id @default(cuid())
+  creatorId       String
+  scriptId        String?
+  title           String
+  slug            String
+  content         String
+  metaDescription String?
+  tags            String[]
+  status          ReviewStatus   @default(PENDING)
+  publishedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  adminReview     AdminReview?
+  creator         CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, slug])
+}
+
+model AdminReview {
+  id         String       @id @default(cuid())
+  ideaId     String?      @unique
+  scriptId   String?      @unique
+  blogId     String?      @unique
+  reviewerId String
+  status     ReviewStatus @default(PENDING)
+  notes      String?
+  reviewedAt DateTime?
+  createdAt  DateTime     @default(now())
+  blog       BlogPost?    @relation(fields: [blogId], references: [id])
+  idea       ContentIdea? @relation(fields: [ideaId], references: [id])
+  reviewer   User         @relation(fields: [reviewerId], references: [id])
+  script     Script?      @relation(fields: [scriptId], references: [id])
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String
+  stripeCustomerId   String?
+  stripeSubId        String?            @unique
+  tier               SubscriptionTier   @default(FREE)
+  status             SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  organization       Organization       @relation(fields: [organizationId], references: [id])
+}
+
+model BillingRecord {
+  id              String       @id @default(cuid())
+  organizationId  String
+  stripeInvoiceId String?      @unique
+  amount          Int
+  currency        String       @default("usd")
+  status          String
+  paidAt          DateTime?
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+  organization    Organization @relation(fields: [organizationId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String
+  meta       Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
 
 enum Role {
   CREATOR
@@ -67,7 +499,6 @@ enum ClipStatus {
   READY
   FAILED
   SCRIPT_NEEDED
-  GENERATING_AI
 }
 
 enum PostStatus {
@@ -117,548 +548,4 @@ enum ReviewStatus {
   APPROVED
   REJECTED
   REVISION_REQUESTED
-}
-
-// ─────────────────────────────────────────────
-// USERS & ORGS
-// ─────────────────────────────────────────────
-
-model User {
-  id            String   @id @default(cuid())
-  clerkId       String   @unique
-  email         String   @unique
-  name          String
-  avatarUrl     String?
-  role          Role     @default(CREATOR)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  organizationId String?
-
-  creatorProfile CreatorProfile?
-  auditLogs      AuditLog[]
-  reviewActions  AdminReview[]
-
-  @@index([clerkId])
-  @@index([email])
-}
-
-model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  logoUrl   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  users         User[]
-  subscriptions Subscription[]
-  billingRecords BillingRecord[]
-}
-
-// ─────────────────────────────────────────────
-// CREATOR PROFILE
-// ─────────────────────────────────────────────
-
-model CreatorProfile {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  displayName     String
-  bio             String?
-  timezone        String   @default("UTC")
-  postingGoal     Int      @default(30) // posts per month
-  onboardingDone  Boolean  @default(false)
-  consentAiVoice  Boolean  @default(false)
-  consentAiAvatar Boolean  @default(false)
-  voiceCloneId    String?  // ElevenLabs voice ID
-  avatarId        String?  // HeyGen avatar ID
-
-  niches          NicheOnCreator[]
-  influencers     InfluencerOnCreator[]
-  ideas           ContentIdea[]
-  videos          UploadedVideo[]
-  socialAccounts  SocialAccount[]
-  contentCalendar ContentCalendarItem[]
-  automations     Automation[]
-  blogPosts       BlogPost[]
-  igConnection    IgConnection?
-  igSubscribers   IgSubscriber[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// ─────────────────────────────────────────────
-// NICHES & INFLUENCERS
-// ─────────────────────────────────────────────
-
-model Niche {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  slug        String   @unique
-  description String?
-  iconUrl     String?
-
-  creators    NicheOnCreator[]
-  influencers Influencer[]
-  trends      TrendInsight[]
-}
-
-model NicheOnCreator {
-  creator   CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  creatorId String
-  niche     Niche          @relation(fields: [nicheId], references: [id])
-  nicheId   String
-  isPrimary Boolean        @default(false)
-
-  @@id([creatorId, nicheId])
-}
-
-model Influencer {
-  id           String   @id @default(cuid())
-  name         String
-  handle       String
-  platform     Platform
-  profileUrl   String
-  avatarUrl    String?
-  followerCount Int?
-  nicheId      String?
-  niche        Niche?   @relation(fields: [nicheId], references: [id])
-  analysisData Json?    // cached trend/style analysis
-  lastAnalyzed DateTime?
-
-  creators     InfluencerOnCreator[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model InfluencerOnCreator {
-  creator      CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  creatorId    String
-  influencer   Influencer     @relation(fields: [influencerId], references: [id])
-  influencerId String
-  addedAt      DateTime       @default(now())
-
-  @@id([creatorId, influencerId])
-}
-
-// ─────────────────────────────────────────────
-// TREND INTELLIGENCE
-// ─────────────────────────────────────────────
-
-model TrendInsight {
-  id        String   @id @default(cuid())
-  nicheId   String
-  niche     Niche    @relation(fields: [nicheId], references: [id])
-  title     String
-  summary   String
-  source    String?
-  rawData   Json?
-  score     Float    @default(0)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-}
-
-// ─────────────────────────────────────────────
-// CONTENT IDEAS
-// ─────────────────────────────────────────────
-
-model ContentIdea {
-  id          String      @id @default(cuid())
-  creatorId   String
-  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-
-  rawIdea     String      // creator's raw input
-  refinedIdea String?     // AI-cleaned version
-  status      IdeaStatus  @default(DRAFT)
-  pillarType  ContentPillarType?
-  tags        String[]
-
-  scripts     Script[]
-  adminReview AdminReview?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([creatorId, status])
-}
-
-// ─────────────────────────────────────────────
-// SCRIPTS
-// ─────────────────────────────────────────────
-
-model Script {
-  id          String       @id @default(cuid())
-  ideaId      String
-  idea        ContentIdea  @relation(fields: [ideaId], references: [id], onDelete: Cascade)
-
-  title       String
-  hook        String
-  painPoint   String?
-  authority   String?
-  solution    String
-  callToAction String
-  fullScript  String       // assembled full text
-  status      ScriptStatus @default(DRAFT)
-  platform    Platform?    // platform-optimized version
-  wordCount   Int?
-  estimatedDuration Int?  // seconds
-
-  versions    ScriptVersion[]
-  clips       RepurposedClip[]
-  calendarItems ContentCalendarItem[]
-  adminReview  AdminReview?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([ideaId, status])
-}
-
-model ScriptVersion {
-  id        String   @id @default(cuid())
-  scriptId  String
-  script    Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-  version   Int
-  snapshot  Json     // full script data at this version
-  editedBy  String?  // userId
-  note      String?
-  createdAt DateTime @default(now())
-}
-
-// ─────────────────────────────────────────────
-// VIDEOS & REPURPOSING
-// ─────────────────────────────────────────────
-
-model UploadedVideo {
-  id           String      @id @default(cuid())
-  creatorId    String
-  creator      CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-
-  title          String
-  description    String?
-  storagePath    String      // blob/storage URL
-  duration       Int?        // seconds
-  sizeBytes      BigInt?
-  mimeType       String?
-  status         VideoStatus @default(UPLOADING)
-  transcript     String?
-  clonedVoiceId  String?     // ElevenLabs cloned voice ID for this video's speaker
-  submagicProjectId  String?     // Submagic Magic Clips project ID
-  metadata       Json?
-
-  clips        RepurposedClip[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model RepurposedClip {
-  id          String     @id @default(cuid())
-  videoId     String
-  video       UploadedVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  scriptId    String?
-  script      Script?    @relation(fields: [scriptId], references: [id])
-
-  title       String
-  storagePath String?
-  duration    Int?
-  startTime   Float?
-  endTime     Float?
-  status      ClipStatus @default(PENDING)
-  opusClipId  String?    // external job ID (Shotstack render ID)
-  thumbnailUrl  String?    // clip thumbnail URL from Submagic
-  format      String?    // content format: jabber, ranking, storytelling, etc.
-  reelScript  Json?      // { hook, painPoint, authority, solution, cta, narrationScript }
-  captions    String?
-  hashtags             String[]
-  postCopy             String?
-  thumbnailCandidates  String[]
-  platform             Platform?
-  metadata             Json?
-  isAIGenerated Boolean @default(false) // clip was auto-generated by AI fill pipeline
-
-  calendarItems ContentCalendarItem[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// ─────────────────────────────────────────────
-// SOCIAL ACCOUNTS & CALENDAR
-// ─────────────────────────────────────────────
-
-model SocialAccount {
-  id          String   @id @default(cuid())
-  creatorId   String
-  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  platform    Platform
-  handle      String
-  accessToken String?  // encrypted
-  refreshToken String? // encrypted
-  tokenExpiry DateTime?
-  postizAccountId String? // Postiz channel ID
-  isActive    Boolean  @default(true)
-
-  scheduledPosts ScheduledPost[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([creatorId, platform])
-}
-
-model ContentCalendarItem {
-  id          String   @id @default(cuid())
-  creatorId   String
-  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  scriptId    String?
-  script      Script?  @relation(fields: [scriptId], references: [id])
-  clipId      String?
-  clip        RepurposedClip? @relation(fields: [clipId], references: [id])
-
-  title       String
-  scheduledFor DateTime
-  platform    Platform
-  pillarType  ContentPillarType?
-  notes       String?
-  status      PostStatus @default(DRAFT)
-
-  scheduledPost ScheduledPost?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([creatorId, scheduledFor])
-}
-
-model ScheduledPost {
-  id              String   @id @default(cuid())
-  calendarItemId  String   @unique
-  calendarItem    ContentCalendarItem @relation(fields: [calendarItemId], references: [id])
-  socialAccountId String
-  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id])
-
-  postizPostId    String?
-  status          PostStatus @default(SCHEDULED)
-  publishedAt     DateTime?
-  failureReason   String?
-  postUrl         String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// ─────────────────────────────────────────────
-// AUTOMATIONS
-// ─────────────────────────────────────────────
-
-model Automation {
-  id          String   @id @default(cuid())
-  creatorId   String
-  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-
-  name        String
-  isActive    Boolean  @default(true)
-  platform    Platform
-  triggerType AutomationTriggerType
-  triggerKeyword String?   // e.g. "GUIDE", "LINK"
-  postUrl     String?
-
-  actions     AutomationAction[]
-  events      AutomationEvent[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model AutomationAction {
-  id           String   @id @default(cuid())
-  automationId String
-  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  order        Int
-  actionType   AutomationActionType
-  template     String   // message template with {{variables}}
-  delaySeconds Int?     @default(0)
-  metadata     Json?
-}
-
-// ─────────────────────────────────────────────
-// INSTAGRAM NATIVE INTEGRATION
-// ─────────────────────────────────────────────
-
-model IgConnection {
-  id            String   @id @default(cuid())
-  creatorId     String   @unique
-  creator       CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-
-  igUserId      String   // Meta IG Business Account ID (numeric)
-  igUsername    String
-  pageId        String?  // Facebook Page ID linked to the IG Business account
-  accessToken   String   // long-lived user access token (encrypted at rest ideally)
-  tokenExpiry   DateTime?
-  webhookActive Boolean  @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-// Every person who has opted in (commented keyword, sent DM keyword, etc.)
-model IgSubscriber {
-  id            String   @id @default(cuid())
-  creatorId     String
-  creator       CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-
-  igUserId      String   // Meta user ID of the subscriber
-  igUsername    String?
-  firstName     String?
-  lastName      String?
-  tags          String[]
-  source        String   // COMMENT_KEYWORD | DM_KEYWORD | STORY_MENTION
-  optedInAt     DateTime @default(now())
-  lastSeenAt    DateTime @default(now())
-
-  events        AutomationEvent[]
-
-  @@unique([creatorId, igUserId])
-  @@index([creatorId])
-}
-
-// Audit log of every automation trigger
-model AutomationEvent {
-  id           String   @id @default(cuid())
-  automationId String?
-  automation   Automation?  @relation(fields: [automationId], references: [id])
-  subscriberId String?
-  subscriber   IgSubscriber? @relation(fields: [subscriberId], references: [id])
-
-  eventType    String   // COMMENT_KEYWORD | DM_KEYWORD | STORY_MENTION | BROADCAST
-  keyword      String?
-  commentId    String?  // Meta comment ID
-  messageId    String?  // Meta message ID
-  status       String   @default("SENT") // SENT | FAILED | SKIPPED
-  errorMsg     String?
-
-  createdAt DateTime @default(now())
-
-  @@index([automationId])
-  @@index([subscriberId])
-}
-
-// ─────────────────────────────────────────────
-// AI AVATAR & VOICE
-// ─────────────────────────────────────────────
-
-model AiVideoJob {
-  id           String   @id @default(cuid())
-  creatorId    String
-  scriptId     String?
-  heygenJobId  String?
-  status       String   @default("pending")
-  outputUrl    String?
-  errorMsg     String?
-  metadata     Json?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
-// ─────────────────────────────────────────────
-// BLOG ENGINE
-// ─────────────────────────────────────────────
-
-model BlogPost {
-  id          String   @id @default(cuid())
-  creatorId   String
-  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  scriptId    String?
-  title       String
-  slug        String
-  content     String
-  metaDescription String?
-  tags        String[]
-  status      ReviewStatus @default(PENDING)
-  publishedAt DateTime?
-  adminReview AdminReview?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([creatorId, slug])
-}
-
-// ─────────────────────────────────────────────
-// ADMIN REVIEW
-// ─────────────────────────────────────────────
-
-model AdminReview {
-  id        String       @id @default(cuid())
-  ideaId    String?      @unique
-  idea      ContentIdea? @relation(fields: [ideaId], references: [id])
-  scriptId  String?      @unique
-  script    Script?      @relation(fields: [scriptId], references: [id])
-  blogId    String?      @unique
-  blog      BlogPost?    @relation(fields: [blogId], references: [id])
-
-  reviewerId String
-  reviewer   User        @relation(fields: [reviewerId], references: [id])
-  status     ReviewStatus @default(PENDING)
-  notes      String?
-  reviewedAt DateTime?
-
-  createdAt DateTime @default(now())
-}
-
-// ─────────────────────────────────────────────
-// BILLING & SUBSCRIPTIONS
-// ─────────────────────────────────────────────
-
-model Subscription {
-  id               String             @id @default(cuid())
-  organizationId   String
-  organization     Organization       @relation(fields: [organizationId], references: [id])
-  stripeCustomerId String?
-  stripeSubId      String?            @unique
-  tier             SubscriptionTier   @default(FREE)
-  status           SubscriptionStatus @default(TRIALING)
-  currentPeriodStart DateTime?
-  currentPeriodEnd   DateTime?
-  cancelAtPeriodEnd  Boolean          @default(false)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-}
-
-model BillingRecord {
-  id             String   @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  stripeInvoiceId String?  @unique
-  amount         Int      // cents
-  currency       String   @default("usd")
-  status         String
-  paidAt         DateTime?
-  metadata       Json?
-  createdAt      DateTime @default(now())
-}
-
-// ─────────────────────────────────────────────
-// AUDIT LOG
-// ─────────────────────────────────────────────
-
-model AuditLog {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  action     String   // e.g. "SCRIPT_APPROVED", "VIDEO_DELETED"
-  entityType String   // e.g. "Script", "Video"
-  entityId   String
-  meta       Json?
-  ipAddress  String?
-  createdAt  DateTime @default(now())
-
-  @@index([userId, createdAt])
-  @@index([entityType, entityId])
 }

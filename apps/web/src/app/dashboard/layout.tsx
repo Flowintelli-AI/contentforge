@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -25,7 +26,30 @@ const NAV = [
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { data } = trpc.creators.getMyProfile.useQuery();
+  const router = useRouter();
+  const { data, isSuccess, isError } = trpc.creators.getMyProfile.useQuery();
+
+  useEffect(() => {
+    if (isSuccess && !data?.creatorProfile) {
+      router.replace("/onboarding");
+    }
+    // If user not found in DB (e.g. first login, context upsert raced), send to onboarding.
+    if (isError) {
+      router.replace("/onboarding");
+    }
+  }, [isSuccess, isError, data, router]);
+
+  // Block rendering until profile check resolves — prevents child pages
+  // from firing tRPC queries (which require creatorProfile) before we redirect.
+  if (!isSuccess && !isError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+
+  if (!data?.creatorProfile) return null; // redirect in progress
 
   return (
     <div className="flex h-screen bg-gray-50">

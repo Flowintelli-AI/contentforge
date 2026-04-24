@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
+    <ClerkProvider afterSignInUrl="/dashboard" afterSignUpUrl="/onboarding">
       <html lang="en" suppressHydrationWarning>
         <body className={inter.className}>
           <TRPCProvider>

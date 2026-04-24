@@ -11,7 +11,7 @@ import { cookies } from "next/headers";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 export async function GET() {
-  const { userId } = auth();
+  const { userId } = await auth();
 
   if (!userId) {
     return NextResponse.redirect(`${APP_URL}/sign-in`);
