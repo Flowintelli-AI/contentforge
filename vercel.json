@@ -1,7 +1,7 @@
 {
   "framework": "nextjs",
   "installCommand": "npm install",
-  "buildCommand": "npx prisma generate --schema packages/db/prisma/schema.prisma && bash scripts/migrate.sh && npm run build --workspace=apps/web",
+  "buildCommand": "npx prisma generate --schema packages/db/prisma/schema.prisma && node scripts/migrate.js && npm run build --workspace=apps/web",
   "outputDirectory": "apps/web/.next",
   "regions": ["iad1"],
   "headers": [
