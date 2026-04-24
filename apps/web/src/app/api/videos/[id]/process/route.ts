@@ -54,7 +54,7 @@ export async function POST(
       },
       body: JSON.stringify({
         audio_url: video.storagePath,
-        speech_model: "best",
+        speech_models: ["best"],
         punctuate: true,
         format_text: true,
         webhook_url: webhookUrl,
