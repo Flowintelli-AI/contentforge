@@ -209,6 +209,9 @@ model RepurposedClip {
   startTime           Float?
   endTime             Float?
   status              ClipStatus            @default(PENDING)
+  format              String?               // content format: jabber, ranking, storytelling, etc.
+  reelScript          Json?                 // { hook, suggestedScript, suggestedHook, isHybridWithOriginal, ... }
+  isAIGenerated       Boolean               @default(false)
   opusClipId          String?
   captions            String?
   hashtags            String[]
@@ -494,6 +497,7 @@ enum VideoStatus {
 }
 
 enum ClipStatus {
+  GENERATING_AI
   PENDING
   PROCESSING
   READY
