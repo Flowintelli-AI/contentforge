@@ -190,11 +190,19 @@ export const videosRouter = createTRPCRouter({
       const igConn = await ctx.db.igConnection.findUnique({ where: { creatorId: profile.id } });
       if (!igConn) throw new TRPCError({ code: "BAD_REQUEST", message: "Instagram not connected" });
 
-      // Fetch SocialAccount record (for FK on ScheduledPost)
-      const socialAccount = await ctx.db.socialAccount.findUnique({
+      // Fetch or auto-create SocialAccount record (for FK on ScheduledPost)
+      const socialAccount = await ctx.db.socialAccount.upsert({
         where: { creatorId_platform: { creatorId: profile.id, platform: "INSTAGRAM" } },
+        create: {
+          creatorId: profile.id,
+          platform: "INSTAGRAM",
+          handle: igConn.igUsername,
+          accessToken: igConn.accessToken,
+          tokenExpiry: igConn.tokenExpiry,
+          isActive: true,
+        },
+        update: {},
       });
-      if (!socialAccount) throw new TRPCError({ code: "BAD_REQUEST", message: "Instagram social account not found" });
 
       // Build full caption
       const fullCaption = [
