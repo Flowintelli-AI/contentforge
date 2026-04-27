@@ -1,13 +1,19 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
-  // Prevent webpack from bundling native binaries — resolved at runtime from node_modules
-  serverExternalPackages: ["ffmpeg-static"],
-  // Explicitly include the ffmpeg binary in Vercel's output file tracing
-  // Use "**" wildcard — route-specific keys don't match App Router compiled paths
-  outputFileTracingIncludes: {
-    "**": ["./node_modules/ffmpeg-static/**"],
+  experimental: {
+    // Next.js 14 equivalents of the v15 top-level keys
+    serverComponentsExternalPackages: ["ffmpeg-static"],
+    outputFileTracingRoot: path.join(__dirname, "../../"),
+    outputFileTracingIncludes: {
+      "**": ["./node_modules/ffmpeg-static/**"],
+    },
   },
   images: {
     remotePatterns: [
