@@ -27,8 +27,14 @@ export default function OnboardingPage() {
   const stepIndex = STEPS.indexOf(step);
   const progress = (stepIndex / (STEPS.length - 1)) * 100;
 
+  const utils = api.useUtils();
   const completeOnboarding = api.creators.completeOnboarding.useMutation({
-    onSuccess: () => router.push("/dashboard"),
+    onSuccess: async () => {
+      // Invalidate cached profile so dashboard layout gets fresh data (with creatorProfile)
+      // before we navigate — prevents the "no profile → redirect back to onboarding" loop.
+      await utils.creators.getMyProfile.invalidate();
+      router.push("/dashboard");
+    },
   });
 
   function next() {
@@ -129,11 +135,20 @@ export default function OnboardingPage() {
               <CardTitle className="text-2xl">You're all set!</CardTitle>
               <CardDescription className="text-base mt-2">Your content machine is ready.</CardDescription>
             </CardHeader>
-            <CardContent className="flex items-center justify-center py-4">
-              {completeOnboarding.isPending
-                ? <Loader2 className="animate-spin w-6 h-6 text-indigo-600" />
-                : <Button className="w-full" onClick={() => router.push("/dashboard")}>Go to Dashboard</Button>
-              }
+            <CardContent className="flex flex-col items-center justify-center py-4 gap-3">
+              {completeOnboarding.isPending ? (
+                <Loader2 className="animate-spin w-6 h-6 text-indigo-600" />
+              ) : completeOnboarding.isError ? (
+                <>
+                  <p className="text-sm text-red-600 text-center">Something went wrong — please try again.</p>
+                  <Button className="w-full" onClick={() => completeOnboarding.mutate({ niches: selectedNiches, postingGoal })}>
+                    Retry
+                  </Button>
+                </>
+              ) : (
+                // onSuccess handler navigates automatically; this is just a safety fallback
+                <Loader2 className="animate-spin w-6 h-6 text-indigo-600" />
+              )}
             </CardContent>
           </Card>
         )}
