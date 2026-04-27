@@ -7,7 +7,7 @@
   "crons": [
     {
       "path": "/api/cron/heygen-recover",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [
