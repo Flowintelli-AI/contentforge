@@ -84,11 +84,11 @@ export const videosRouter = createTRPCRouter({
       });
     }),
 
-  /** List all READY clips for the creator (across all videos) — for the publishing UI */
+  /** List all READY + DRAFT clips for the creator — for the publishing UI */
   listReadyClips: protectedProcedure.query(async ({ ctx }) => {
     const profile = await getProfile(ctx);
     return ctx.db.repurposedClip.findMany({
-      where: { video: { creatorId: profile.id }, status: "READY" },
+      where: { video: { creatorId: profile.id }, status: { in: ["READY", "DRAFT"] } },
       include: {
         video: { select: { title: true } },
         calendarItems: {
@@ -98,6 +98,71 @@ export const videosRouter = createTRPCRouter({
         },
       },
       orderBy: { createdAt: "desc" },
+    });
+  }),
+
+  /** Save draft edits (postCopy, hashtags, thumbnailUrl) without scheduling */
+  saveDraft: protectedProcedure
+    .input(
+      z.object({
+        clipId: z.string(),
+        postCopy: z.string().max(2200).optional(),
+        hashtags: z.array(z.string()).max(30).optional(),
+        thumbnailUrl: z.string().url().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const profile = await getProfile(ctx);
+      const clip = await ctx.db.repurposedClip.findFirst({
+        where: { id: input.clipId, video: { creatorId: profile.id } },
+      });
+      if (!clip) throw new TRPCError({ code: "NOT_FOUND" });
+
+      return ctx.db.repurposedClip.update({
+        where: { id: input.clipId },
+        data: {
+          status: "DRAFT",
+          ...(input.postCopy !== undefined && { postCopy: input.postCopy }),
+          ...(input.hashtags !== undefined && { hashtags: input.hashtags }),
+          ...(input.thumbnailUrl !== undefined && { thumbnailUrl: input.thumbnailUrl }),
+        },
+      });
+    }),
+
+  /** Update just the thumbnailUrl (e.g., after filmstrip pick or canvas bake) */
+  updateThumbnail: protectedProcedure
+    .input(z.object({ clipId: z.string(), thumbnailUrl: z.string().url() }))
+    .mutation(async ({ ctx, input }) => {
+      const profile = await getProfile(ctx);
+      const clip = await ctx.db.repurposedClip.findFirst({
+        where: { id: input.clipId, video: { creatorId: profile.id } },
+      });
+      if (!clip) throw new TRPCError({ code: "NOT_FOUND" });
+      return ctx.db.repurposedClip.update({
+        where: { id: input.clipId },
+        data: { thumbnailUrl: input.thumbnailUrl },
+      });
+    }),
+
+  /** List clips that have been published to Instagram */
+  listPublishedPosts: protectedProcedure.query(async ({ ctx }) => {
+    const profile = await getProfile(ctx);
+    return ctx.db.contentCalendarItem.findMany({
+      where: { creatorId: profile.id, status: "PUBLISHED" },
+      include: {
+        clip: {
+          select: {
+            id: true,
+            title: true,
+            thumbnailUrl: true,
+            storagePath: true,
+            postCopy: true,
+            hashtags: true,
+          },
+        },
+        scheduledPost: { select: { status: true, postUrl: true, publishedAt: true } },
+      },
+      orderBy: { scheduledFor: "desc" },
     });
   }),
 
@@ -114,9 +179,9 @@ export const videosRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const profile = await getProfile(ctx);
 
-      // Verify clip is READY and belongs to this creator
+      // Verify clip is READY or DRAFT and belongs to this creator
       const clip = await ctx.db.repurposedClip.findFirst({
-        where: { id: input.clipId, video: { creatorId: profile.id }, status: "READY" },
+        where: { id: input.clipId, video: { creatorId: profile.id }, status: { in: ["READY", "DRAFT"] } },
       });
       if (!clip) throw new TRPCError({ code: "NOT_FOUND", message: "Clip not found or not READY" });
       if (!clip.storagePath) throw new TRPCError({ code: "BAD_REQUEST", message: "Clip has no video URL" });

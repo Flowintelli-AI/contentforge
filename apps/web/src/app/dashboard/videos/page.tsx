@@ -37,6 +37,7 @@ import {
   Image as ImageIcon,
   Hash,
   AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -77,8 +78,10 @@ type ReadyClip = {
   title: string | null;
   storagePath: string | null;
   thumbnailUrl: string | null;
+  thumbnailCandidates: string[];
   postCopy: string | null;
   hashtags: string[];
+  status: string;
   calendarItems: Array<{
     scheduledFor: Date;
     status: string;
@@ -86,6 +89,28 @@ type ReadyClip = {
   }>;
   video: { title: string };
 };
+
+const OVERLAY_STYLES = {
+  BOLD: {
+    label: "BOLD",
+    className:
+      "absolute bottom-4 left-0 right-0 text-center text-white font-black text-xl uppercase tracking-wide leading-tight px-2",
+    shadow: "drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]",
+  },
+  IMPACT: {
+    label: "IMPACT",
+    className:
+      "absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-white font-black text-2xl uppercase bg-black/50 py-2 px-3",
+    shadow: "",
+  },
+  MINIMAL: {
+    label: "MINIMAL",
+    className:
+      "absolute top-3 left-3 text-white/95 text-sm font-semibold bg-black/50 px-2 py-1 rounded",
+    shadow: "",
+  },
+} as const;
+type OverlayStyle = keyof typeof OVERLAY_STYLES;
 
 function ScheduleModal({
   clip,
@@ -96,13 +121,20 @@ function ScheduleModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const [selectedThumb, setSelectedThumb] = useState(
+    clip.thumbnailUrl ?? clip.thumbnailCandidates[0] ?? null
+  );
+  const [hookText, setHookText] = useState("");
+  const [overlayStyle, setOverlayStyle] = useState<OverlayStyle>("BOLD");
+  const [isBaking, setIsBaking] = useState(false);
   const [caption, setCaption] = useState(clip.postCopy ?? "");
   const [hashtags, setHashtags] = useState(clip.hashtags.join(" "));
   const [scheduledDate, setScheduledDate] = useState(() => {
     const d = new Date();
     d.setHours(d.getHours() + 1, 0, 0, 0);
-    return d.toISOString().slice(0, 16); // datetime-local format
+    return d.toISOString().slice(0, 16);
   });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const scheduleMutation = api.videos.scheduleClip.useMutation({
     onSuccess: () => {
@@ -112,17 +144,108 @@ function ScheduleModal({
     onError: (e) => toast.error(e.message),
   });
 
+  const saveDraftMutation = api.videos.saveDraft.useMutation({
+    onSuccess: () => {
+      toast.success("Draft saved");
+      onSuccess();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateThumbnailMutation = api.videos.updateThumbnail.useMutation({
+    onError: (e) => toast.error("Thumbnail update failed: " + e.message),
+  });
+
+  const handleSelectThumb = (url: string) => {
+    setSelectedThumb(url);
+    updateThumbnailMutation.mutate({ clipId: clip.id, thumbnailUrl: url });
+  };
+
+  const bakeOverlay = async () => {
+    if (!selectedThumb || !hookText.trim()) return;
+    setIsBaking(true);
+    try {
+      const canvas = canvasRef.current!;
+      // Reels aspect ratio: 9:16 @ 540×960
+      canvas.width = 540;
+      canvas.height = 960;
+      const ctx2d = canvas.getContext("2d")!;
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = rej;
+        img.src = selectedThumb;
+      });
+      ctx2d.drawImage(img, 0, 0, 540, 960);
+
+      const text = hookText.trim().toUpperCase();
+      if (overlayStyle === "BOLD") {
+        ctx2d.font = "bold 52px Impact, Arial Black, sans-serif";
+        ctx2d.textAlign = "center";
+        ctx2d.lineWidth = 6;
+        ctx2d.strokeStyle = "rgba(0,0,0,0.9)";
+        ctx2d.strokeText(text, 270, 900);
+        ctx2d.fillStyle = "white";
+        ctx2d.fillText(text, 270, 900);
+      } else if (overlayStyle === "IMPACT") {
+        ctx2d.fillStyle = "rgba(0,0,0,0.55)";
+        ctx2d.fillRect(0, 430, 540, 100);
+        ctx2d.font = "bold 60px Impact, Arial Black, sans-serif";
+        ctx2d.textAlign = "center";
+        ctx2d.fillStyle = "white";
+        ctx2d.fillText(text, 270, 495);
+      } else {
+        ctx2d.fillStyle = "rgba(0,0,0,0.5)";
+        ctx2d.roundRect(20, 20, Math.min(ctx2d.measureText(text).width + 24, 500), 44, 6);
+        ctx2d.fill();
+        ctx2d.font = "600 28px sans-serif";
+        ctx2d.textAlign = "left";
+        ctx2d.fillStyle = "rgba(255,255,255,0.95)";
+        ctx2d.fillText(text, 32, 48);
+      }
+
+      const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), "image/jpeg", 0.92));
+      const res = await fetch(`/api/clips/${clip.id}/thumbnail`, {
+        method: "POST",
+        headers: { "Content-Type": "image/jpeg" },
+        body: blob,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const { url } = await res.json() as { url: string };
+      setSelectedThumb(url);
+      toast.success("Thumbnail baked ✓");
+    } catch {
+      toast.error("Failed to bake thumbnail");
+    } finally {
+      setIsBaking(false);
+    }
+  };
+
   const handleSubmit = () => {
     const tagList = hashtags
       .split(/[\s,]+/)
       .map((t) => t.replace(/^#/, "").trim())
       .filter(Boolean);
-
     scheduleMutation.mutate({
       clipId: clip.id,
       caption,
       hashtags: tagList,
       scheduledFor: new Date(scheduledDate),
+    });
+  };
+
+  const handleSaveDraft = () => {
+    const tagList = hashtags
+      .split(/[\s,]+/)
+      .map((t) => t.replace(/^#/, "").trim())
+      .filter(Boolean);
+    saveDraftMutation.mutate({
+      clipId: clip.id,
+      postCopy: caption,
+      hashtags: tagList,
+      thumbnailUrl: selectedThumb ?? undefined,
     });
   };
 
@@ -133,36 +256,107 @@ function ScheduleModal({
     .filter(Boolean)
     .map((t) => `#${t}`)
     .join(" ");
+  const candidates = clip.thumbnailCandidates ?? [];
+  const style = OVERLAY_STYLES[overlayStyle];
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Instagram className="h-5 w-5 text-pink-500" />
-            Schedule to Instagram
+            {clip.status === "DRAFT" ? "Edit Draft" : "Schedule to Instagram"}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Thumbnail preview */}
-          <div className="relative aspect-[9/16] max-h-40 w-auto mx-auto overflow-hidden rounded-lg bg-black flex items-center justify-center">
-            {clip.thumbnailUrl ? (
-              <img src={clip.thumbnailUrl} alt="Thumbnail" className="object-cover w-full h-full" />
+          {/* Thumbnail filmstrip picker */}
+          {candidates.length > 1 && (
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <ImageIcon className="h-3.5 w-3.5" /> Pick Thumbnail
+              </Label>
+              <div className="flex gap-2 overflow-x-auto pb-1 snap-x">
+                {candidates.map((url, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSelectThumb(url)}
+                    className={`shrink-0 snap-start rounded overflow-hidden border-2 transition-all ${
+                      selectedThumb === url
+                        ? "border-pink-500 ring-2 ring-pink-400/40 scale-105"
+                        : "border-transparent opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <img
+                      src={url}
+                      alt={`Frame ${i + 1}`}
+                      className="w-14 aspect-[9/16] object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Preview + text overlay */}
+          <div className="relative aspect-[9/16] max-h-52 w-auto mx-auto overflow-hidden rounded-lg bg-black flex items-center justify-center">
+            {selectedThumb ? (
+              <img src={selectedThumb} alt="Thumbnail" className="object-cover w-full h-full" />
             ) : clip.storagePath ? (
               <video src={clip.storagePath} className="object-cover w-full h-full" preload="metadata" />
             ) : (
-              <ImageIcon className="h-8 w-8 text-muted-foreground" />
+              <Film className="h-8 w-8 text-muted-foreground" />
+            )}
+            {hookText.trim() && (
+              <div className={`${style.className} ${style.shadow}`}>{hookText.trim()}</div>
             )}
           </div>
-          <p className="text-sm font-medium text-center truncate">{clip.title ?? "Untitled clip"}</p>
+
+          {/* Text overlay controls */}
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Text overlay (optional)</Label>
+            <Input
+              value={hookText}
+              onChange={(e) => setHookText(e.target.value)}
+              placeholder="Hook text e.g. WAIT FOR IT…"
+              maxLength={50}
+              className="text-sm"
+            />
+            <div className="flex gap-2 items-center flex-wrap">
+              {(Object.keys(OVERLAY_STYLES) as OverlayStyle[]).map((s) => (
+                <Button
+                  key={s}
+                  variant={overlayStyle === s ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs px-2"
+                  onClick={() => setOverlayStyle(s)}
+                >
+                  {OVERLAY_STYLES[s].label}
+                </Button>
+              ))}
+              {hookText.trim() && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 text-xs px-2 ml-auto"
+                  onClick={bakeOverlay}
+                  disabled={isBaking}
+                >
+                  {isBaking ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                  {isBaking ? "Baking…" : "Bake into thumbnail"}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <p className="text-xs font-medium truncate text-center text-muted-foreground">{clip.title ?? "Untitled clip"}</p>
 
           {/* Caption */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label>Caption</Label>
-              <span className={`text-xs ${captionLen > 2200 ? "text-destructive" : "text-muted-foreground"}`}>
-                {captionLen}/2200
+              <span className={`text-xs ${captionLen > 2200 ? "text-destructive" : captionLen > 125 ? "text-amber-500" : "text-muted-foreground"}`}>
+                {captionLen}/2200 {captionLen <= 125 && <span className="text-green-500">✓ preview</span>}
               </span>
             </div>
             <Textarea
@@ -207,9 +401,20 @@ function ScheduleModal({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={scheduleMutation.isPending}>
+        {/* Hidden canvas for baking */}
+        <canvas ref={canvasRef} className="hidden" />
+
+        <DialogFooter className="flex-wrap gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={scheduleMutation.isPending || saveDraftMutation.isPending}>
             Cancel
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleSaveDraft}
+            disabled={scheduleMutation.isPending || saveDraftMutation.isPending}
+          >
+            {saveDraftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Save Draft
           </Button>
           <Button
             onClick={handleSubmit}
@@ -250,6 +455,7 @@ export default function VideosPage() {
 
   const { data: readyClips = [], refetch: refetchClips } = api.videos.listReadyClips.useQuery();
   const { data: igConn } = api.instagram.getConnection.useQuery();
+  const { data: publishedPosts = [] } = api.videos.listPublishedPosts.useQuery();
 
   useEffect(() => {
     const hasProcessing = videos.some(
@@ -412,9 +618,17 @@ export default function VideosPage() {
           </TabsTrigger>
           <TabsTrigger value="clips">
             <Scissors className="h-4 w-4 mr-1.5" /> Ready Clips
-            {readyClips.length > 0 && (
+            {readyClips.filter((c) => c.status === "READY").length > 0 && (
               <span className="ml-1.5 rounded-full bg-primary text-primary-foreground text-[10px] px-1.5 py-0">
-                {readyClips.length}
+                {readyClips.filter((c) => c.status === "READY").length}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="published">
+            <CheckCircle className="h-4 w-4 mr-1.5" /> Published
+            {publishedPosts.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-green-600 text-white text-[10px] px-1.5 py-0">
+                {publishedPosts.length}
               </span>
             )}
           </TabsTrigger>
@@ -677,6 +891,11 @@ export default function VideosPage() {
                           Scheduled
                         </div>
                       )}
+                      {!isScheduled && clip.status === "DRAFT" && (
+                        <div className="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-medium px-2 py-0.5 rounded-full">
+                          Draft
+                        </div>
+                      )}
                     </div>
 
                     <CardContent className="pt-3 pb-3 flex flex-col gap-2 flex-1">
@@ -725,10 +944,88 @@ export default function VideosPage() {
                             disabled={!igConn}
                           >
                             <Instagram className="h-3.5 w-3.5 mr-1.5" />
-                            Schedule to Instagram
+                            {clip.status === "DRAFT" ? "Continue Editing" : "Schedule to Instagram"}
                           </Button>
                         )}
                       </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ─── Published Tab ─── */}
+        <TabsContent value="published" className="mt-4">
+          {publishedPosts.length === 0 ? (
+            <Card className="border-dashed border-2 border-muted-foreground/20">
+              <CardContent className="py-16 flex flex-col items-center justify-center text-center text-muted-foreground">
+                <CheckCircle className="h-10 w-10 mb-4 opacity-30" />
+                <p className="font-medium">No published posts yet</p>
+                <p className="text-sm mt-1">Schedule and publish clips to Instagram — they'll appear here.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {publishedPosts.map((item) => {
+                const clip = item.clip;
+                const post = item.scheduledPost;
+                const publishedAt = post?.publishedAt ?? item.scheduledFor;
+                return (
+                  <Card key={item.id} className="overflow-hidden flex flex-col">
+                    <div className="relative aspect-[9/16] bg-black overflow-hidden">
+                      {clip?.thumbnailUrl ? (
+                        <img
+                          src={clip.thumbnailUrl}
+                          alt={clip.title ?? "Published clip"}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : clip?.storagePath ? (
+                        <video
+                          src={clip.storagePath}
+                          className="w-full h-full object-cover opacity-80"
+                          preload="metadata"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Film className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="absolute top-2 left-2 bg-green-600 text-white text-[10px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" /> Published
+                      </div>
+                    </div>
+
+                    <CardContent className="pt-3 pb-3 flex flex-col gap-2 flex-1">
+                      <p className="font-medium text-sm leading-tight line-clamp-2">
+                        {clip?.title ?? "Untitled clip"}
+                      </p>
+                      {clip?.postCopy && (
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                          {clip.postCopy}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground mt-auto">
+                        <Calendar className="h-3 w-3" />
+                        {publishedAt
+                          ? new Date(publishedAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : "Unknown date"}
+                      </div>
+                      {post?.postUrl && (
+                        <a
+                          href={post.postUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-pink-500 hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink className="h-3 w-3" /> View on Instagram
+                        </a>
+                      )}
                     </CardContent>
                   </Card>
                 );

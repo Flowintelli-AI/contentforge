@@ -503,6 +503,7 @@ enum ClipStatus {
   PENDING
   PROCESSING
   READY
+  DRAFT
   FAILED
   SCRIPT_NEEDED
 }
