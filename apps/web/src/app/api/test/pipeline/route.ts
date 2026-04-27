@@ -28,6 +28,7 @@ import { reapService } from "@/lib/integrations/reap/service";
 import { heyGenService } from "@/lib/integrations/heygen/service";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { renderMediaOnLambda, getRenderProgress } from "@remotion/lambda/client";
+import { recoverHeygenClip } from "@/lib/integrations/heygen/recover";
 
 export const maxDuration = 300;
 
@@ -376,111 +377,12 @@ export async function GET(req: Request) {
   if (stage === "heygen-recover") {
     const clipId = url.searchParams.get("clipId") ?? "";
     if (!clipId) return NextResponse.json({ error: "clipId param required" }, { status: 400 });
-
-    const clip = await db.repurposedClip.findUnique({ where: { id: clipId } });
-    if (!clip) return NextResponse.json({ error: "Clip not found" }, { status: 404 });
-
-    const lipsyncRef = clip.opusClipId ?? "";
-    if (!lipsyncRef.startsWith("heygen:")) {
-      return NextResponse.json({ error: `Not a HeyGen clip (opusClipId=${lipsyncRef})` }, { status: 400 });
+    try {
+      const result = await recoverHeygenClip(clipId);
+      return ok("heygen-recover", result);
+    } catch (err) {
+      return fail("heygen-recover", err);
     }
-    const lipsyncId = lipsyncRef.replace("heygen:", "");
-    const apiKey = process.env.HEYGEN_API_KEY ?? "";
-    if (!apiKey) return NextResponse.json({ error: "HEYGEN_API_KEY not set" }, { status: 500 });
-
-    const heyRes = await fetch(`https://api.heygen.com/v3/lipsyncs/${lipsyncId}`, {
-      headers: { "X-Api-Key": apiKey },
-    });
-    const heyData = await heyRes.json() as { data: { status: string; video_url?: string; failure_message?: string; id: string } };
-    const { status: heyStatus, video_url: videoUrl, failure_message: failMsg } = heyData.data ?? {};
-
-    if (heyStatus === "failed" || heyStatus === "error") {
-      await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
-      return ok("heygen-recover", { action: "marked-failed", heyStatus, failMsg });
-    }
-
-    if (heyStatus !== "completed" && heyStatus !== "success") {
-      return ok("heygen-recover", { action: "still-running", heyStatus, lipsyncId, clipId });
-    }
-
-    if (!videoUrl) {
-      return ok("heygen-recover", { action: "completed-no-url", heyStatus, lipsyncId, note: "HeyGen done but no video_url returned" });
-    }
-
-    // HeyGen complete — trigger Remotion render via waitUntil
-    const meta = (clip.metadata as Record<string, unknown> | null) ?? {};
-    const wordTimings = (meta.wordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
-    const durationFromWords = wordTimings.length > 0 ? wordTimings[wordTimings.length - 1].end + 0.5 : null;
-    const durationSec = durationFromWords ?? clip.duration ?? 30;
-    const reelScriptData = (clip.reelScript as Record<string, unknown> | null) ?? {};
-    const isHybrid = reelScriptData.isHybridWithOriginal === true;
-
-    await db.repurposedClip.update({
-      where: { id: clipId },
-      data: { metadata: { ...meta, heygenVideoUrl: videoUrl } },
-    });
-
-    if (isHybrid) {
-      const hookWordTimings = (meta.hookWordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
-      const originalWordTimings = (reelScriptData.originalWordTimings as Array<{ word: string; start: number; end: number }>) ?? [];
-      const originalStart = (reelScriptData.originalStart as number) ?? 0;
-      const originalEnd = (reelScriptData.originalEnd as number) ?? 0;
-      const originalSrc = reelScriptData.originalSrc as string;
-      const videoRotation = (reelScriptData.videoRotation as number | undefined) ?? 0;
-      const hookDurationSec = hookWordTimings.length > 0 ? hookWordTimings[hookWordTimings.length - 1].end + 0.5 : 3;
-      const originalDurationSec = Math.max(1, originalEnd - originalStart);
-      const totalDurationSec = hookDurationSec + originalDurationSec;
-      const offsetOriginalTimings = originalWordTimings.map((w) => ({
-        ...w,
-        start: parseFloat((w.start + hookDurationSec).toFixed(3)),
-        end: parseFloat((w.end + hookDurationSec).toFixed(3)),
-      }));
-      const combinedWordTimings = [...hookWordTimings, ...offsetOriginalTimings];
-
-      waitUntil(
-        remotionRenderService.renderClipAndWait({
-          segments: [
-            { type: "heygen", src: videoUrl, startFrom: 0, duration: hookDurationSec, offsetFrom: 0 },
-            { type: "original", src: originalSrc, startFrom: originalStart, duration: originalDurationSec, offsetFrom: hookDurationSec, rotation: videoRotation },
-          ],
-          wordTimings: combinedWordTimings,
-          captionStyle: "KARAOKE",
-          totalDurationSec,
-        }).then(async (outputUrl) => {
-          const caption = (reelScriptData.caption as string | undefined) ?? null;
-          const hashtags = Array.isArray(reelScriptData.hashtags) ? (reelScriptData.hashtags as string[]) : [];
-          await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags } });
-        }).catch(async (err) => {
-          await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED", metadata: { ...meta, heygenVideoUrl: videoUrl, renderError: String(err) } } });
-        })
-      );
-    } else {
-      waitUntil(
-        remotionRenderService.renderClipAndWait({
-          segments: [{ type: "heygen", src: videoUrl, startFrom: 0, duration: durationSec, offsetFrom: 0 }],
-          wordTimings,
-          captionStyle: "KARAOKE",
-          totalDurationSec: durationSec,
-        }).then(async (outputUrl) => {
-          const caption = (reelScriptData.caption as string | undefined) ?? null;
-          const hashtags = Array.isArray(reelScriptData.hashtags) ? (reelScriptData.hashtags as string[]) : [];
-          await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags } });
-        }).catch(async (err) => {
-          await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED", metadata: { ...meta, heygenVideoUrl: videoUrl, renderError: String(err) } } });
-        })
-      );
-    }
-
-    return ok("heygen-recover", {
-      action: "remotion-render-queued",
-      heyStatus,
-      lipsyncId,
-      videoUrl,
-      durationSec,
-      isHybrid,
-      wordTimings: wordTimings.length,
-      note: "Remotion render started via waitUntil — poll stage=db-clip to check progress",
-    });
   }
 
   // ── db-clip ─────────────────────────────────────────────────────────────────

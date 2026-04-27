@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { generateCarouselPdf } from '../pipeline';
+import { generateCarouselPdf, CarouselRenderResult } from '../pipeline';
 import { CarouselInput, SlideData } from '../brand';
 import { articleToCarousel } from '../articleToCarousel';
 
@@ -95,12 +95,18 @@ async function generateCarousel(
   }
 
   try {
-    const pdf_base64 = await generateCarouselPdf(input);
+    const result: CarouselRenderResult = await generateCarouselPdf(input);
     return {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-      // Return slides so Make.com can log/store the structured content alongside the PDF
-      body: JSON.stringify({ pdf_base64, format: input.format, caption: input.caption, slides: input.slides }),
+      // pdf_base64 → LinkedIn; slides_png_urls → Instagram (public blob URLs)
+      body: JSON.stringify({
+        pdf_base64: result.pdf_base64,
+        slides_png_urls: result.slides_png_urls,
+        format: input.format,
+        caption: input.caption,
+        slides: input.slides,
+      }),
     };
   } catch (err) {
     context.error('generateCarousel render error:', err);
