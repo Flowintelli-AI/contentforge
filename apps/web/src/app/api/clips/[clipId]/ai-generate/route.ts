@@ -19,6 +19,8 @@ export async function POST(
 
 // ── Legacy helpers kept to avoid build errors; never called ──────────────────
 
+const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"; // Rachel (ElevenLabs default)
+
 const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,

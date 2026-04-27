@@ -2,6 +2,7 @@
 // Called via waitUntil after AssemblyAI webhook creates GENERATING_AI clips.
 
 import { db } from "@contentforge/db";
+import type { Prisma } from "@contentforge/db";
 import { generateAndUploadVoiceover, trimAndUploadFaceVideo, cloneVoiceFromVideo } from "@/lib/video-processing";
 import { heyGenService } from "@/lib/integrations/heygen/service";
 import { createLogger } from "../shared/logger";
@@ -147,7 +148,7 @@ export async function processAiClip(clipId: string): Promise<void> {
       const existingMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
       await db.repurposedClip.update({
         where: { id: clipId },
-        data: { metadata: { ...existingMeta, hookWordTimings, elevenlabsChars: hookText.length } },
+        data: { metadata: { ...existingMeta, hookWordTimings, elevenlabsChars: hookText.length } as unknown as Prisma.InputJsonValue },
       });
 
       // Trim face video to hook duration + bake in rotation, then submit to HeyGen directly
@@ -233,7 +234,7 @@ export async function processAiClip(clipId: string): Promise<void> {
     const existingClipMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
     await db.repurposedClip.update({
       where: { id: clipId },
-      data: { metadata: { ...existingClipMeta, wordTimings, elevenlabsChars: script.length } },
+      data: { metadata: { ...existingClipMeta, wordTimings, elevenlabsChars: script.length } as unknown as Prisma.InputJsonValue },
     });
 
     // 2. Trim face video to exact audio duration — identical length, 0% diff for HeyGen.

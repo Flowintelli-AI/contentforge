@@ -9,6 +9,7 @@ import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { thumbnailService } from "@/lib/integrations/thumbnail/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
 import { computeClipCostUsd } from "@/lib/costs";
+import type { Prisma } from "@contentforge/db";
 
 export const maxDuration = 300;
 
@@ -163,7 +164,7 @@ export async function POST(req: Request) {
                   postCopy: caption,
                   hashtags,
                   costUsd: costBreakdown.total,
-                  metadata: { ...clipMeta, costBreakdown },
+                  metadata: { ...clipMeta, costBreakdown } as unknown as Prisma.InputJsonValue,
                 },
               });
               // Trigger thumbnail extraction non-blocking (fires inside the waitUntil scope)
@@ -217,7 +218,7 @@ export async function POST(req: Request) {
                 postCopy: caption,
                 hashtags,
                 costUsd: costBreakdown.total,
-                metadata: { ...clipMeta, costBreakdown },
+                metadata: { ...clipMeta, costBreakdown } as unknown as Prisma.InputJsonValue,
               },
             });
             // Trigger thumbnail extraction non-blocking (fires inside the waitUntil scope)

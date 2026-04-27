@@ -11,6 +11,7 @@
 
 import { waitUntil } from "@vercel/functions";
 import { db } from "@contentforge/db";
+import type { Prisma } from "@contentforge/db";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { thumbnailService } from "@/lib/integrations/thumbnail/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
@@ -116,7 +117,7 @@ export async function recoverHeygenClip(clipId: string): Promise<RecoveryResult>
         const clipMeta = (await db.repurposedClip.findUnique({ where: { id: clipId }, select: { metadata: true } }))?.metadata as Record<string, unknown> | null ?? {};
         const elevenlabsChars = clipMeta.elevenlabsChars as number | undefined;
         const costBreakdown = computeClipCostUsd({ elevenlabsChars, heygenDurationSec, remotionDurationSec: totalDurationSec });
-        await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags, costUsd: costBreakdown.total, metadata: { ...clipMeta, costBreakdown } } });
+        await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags, costUsd: costBreakdown.total, metadata: { ...clipMeta, costBreakdown } as unknown as Prisma.InputJsonValue } });
         thumbnailService.extractAndSave(clipId, outputUrl).catch((e) => logger.error("Thumbnail failed (hybrid)", { clipId, error: String(e) }));
         logger.info("Hybrid clip recovered and ready", { clipId, outputUrl, costUsd: costBreakdown.total });
       }).catch(async (err) => {
@@ -142,7 +143,7 @@ export async function recoverHeygenClip(clipId: string): Promise<RecoveryResult>
       const clipMeta = (await db.repurposedClip.findUnique({ where: { id: clipId }, select: { metadata: true } }))?.metadata as Record<string, unknown> | null ?? {};
       const elevenlabsChars = clipMeta.elevenlabsChars as number | undefined;
       const costBreakdown = computeClipCostUsd({ elevenlabsChars, heygenDurationSec, remotionDurationSec: durationSec });
-      await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags, costUsd: costBreakdown.total, metadata: { ...clipMeta, costBreakdown } } });
+      await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags, costUsd: costBreakdown.total, metadata: { ...clipMeta, costBreakdown } as unknown as Prisma.InputJsonValue } });
       thumbnailService.extractAndSave(clipId, outputUrl).catch((e) => logger.error("Thumbnail failed", { clipId, error: String(e) }));
       logger.info("Type 2 clip recovered and ready", { clipId, outputUrl, costUsd: costBreakdown.total });
     }).catch(async (err) => {
