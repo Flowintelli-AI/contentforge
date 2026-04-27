@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import { waitUntil } from "@vercel/functions";
 import { processAiClip } from "@/lib/integrations/heygen/processor";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
+import { computeClipCostUsd } from "@/lib/costs";
 
 export const maxDuration = 300;
 
@@ -456,11 +457,12 @@ export async function POST(req: Request) {
             totalDurationSec: durationSec,
           })
           .then(async (outputUrl) => {
+            const costBreakdown = computeClipCostUsd({ remotionDurationSec: durationSec });
             await db.repurposedClip.update({
               where: { id: clip.id },
-              data: { storagePath: outputUrl, status: 'READY' },
+              data: { storagePath: outputUrl, status: 'READY', costUsd: costBreakdown.total },
             });
-            console.log(`[assemblyai] Type 1 clip ready: clipId=${clip.id} url=${outputUrl}`);
+            console.log(`[assemblyai] Type 1 clip ready: clipId=${clip.id} url=${outputUrl} costUsd=${costBreakdown.total}`);
           })
           .catch(async (err) => {
             console.error(`[assemblyai] Remotion render failed: clipId=${clip.id}`, err);

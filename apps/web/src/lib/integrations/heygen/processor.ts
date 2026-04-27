@@ -143,11 +143,11 @@ export async function processAiClip(clipId: string): Promise<void> {
       );
       logger.info("Hook voiceover ready", { clipId, audioUrl, words: hookWordTimings.length, hookDuration });
 
-      // Store hook word timings; original word timings are in reelScript.originalWordTimings
+      // Store hook word timings + char count for cost tracking
       const existingMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
       await db.repurposedClip.update({
         where: { id: clipId },
-        data: { metadata: { ...existingMeta, hookWordTimings } },
+        data: { metadata: { ...existingMeta, hookWordTimings, elevenlabsChars: hookText.length } },
       });
 
       // Trim face video to hook duration + bake in rotation, then submit to HeyGen directly
@@ -228,12 +228,12 @@ export async function processAiClip(clipId: string): Promise<void> {
     );
     logger.info("Voiceover ready", { clipId, audioUrl, wordTimings: wordTimings.length, audioDurationSec });
 
-    // Persist word timings so the HeyGen webhook can pass them to Remotion for captions.
+    // Persist word timings + char count so the HeyGen webhook can pass them to Remotion for captions.
     // ElevenLabs timings are already in seconds, relative to the TTS audio start — perfect for Remotion.
     const existingClipMeta = (clip.metadata as Record<string, unknown> | null) ?? {};
     await db.repurposedClip.update({
       where: { id: clipId },
-      data: { metadata: { ...existingClipMeta, wordTimings } },
+      data: { metadata: { ...existingClipMeta, wordTimings, elevenlabsChars: script.length } },
     });
 
     // 2. Trim face video to exact audio duration — identical length, 0% diff for HeyGen.

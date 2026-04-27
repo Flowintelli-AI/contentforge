@@ -14,6 +14,7 @@ import { db } from "@contentforge/db";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { thumbnailService } from "@/lib/integrations/thumbnail/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
+import { computeClipCostUsd } from "@/lib/costs";
 
 const logger = createLogger("heygen-recover");
 
@@ -43,7 +44,7 @@ export async function recoverHeygenClip(clipId: string): Promise<RecoveryResult>
   const apiKey = process.env.HEYGEN_API_KEY ?? "";
   if (!apiKey) return { action: "error", error: "HEYGEN_API_KEY not set" };
 
-  let heyData: { data: { status: string; video_url?: string; failure_message?: string } };
+  let heyData: { data: { status: string; video_url?: string; failure_message?: string; duration?: number } };
   try {
     const res = await fetch(`https://api.heygen.com/v3/lipsyncs/${lipsyncId}`, {
       headers: { "X-Api-Key": apiKey },
@@ -53,7 +54,7 @@ export async function recoverHeygenClip(clipId: string): Promise<RecoveryResult>
     return { action: "error", error: `HeyGen API call failed: ${String(err)}` };
   }
 
-  const { status: heyStatus, video_url: videoUrl, failure_message: failMsg } = heyData.data ?? {};
+  const { status: heyStatus, video_url: videoUrl, failure_message: failMsg, duration: heygenDurationSec } = heyData.data ?? {};
 
   if (heyStatus === "failed" || heyStatus === "error") {
     await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED" } });
@@ -112,9 +113,12 @@ export async function recoverHeygenClip(clipId: string): Promise<RecoveryResult>
       }).then(async (outputUrl) => {
         const caption = (reelScriptData.caption as string | undefined) ?? null;
         const hashtags = Array.isArray(reelScriptData.hashtags) ? (reelScriptData.hashtags as string[]) : [];
-        await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags } });
+        const clipMeta = (await db.repurposedClip.findUnique({ where: { id: clipId }, select: { metadata: true } }))?.metadata as Record<string, unknown> | null ?? {};
+        const elevenlabsChars = clipMeta.elevenlabsChars as number | undefined;
+        const costBreakdown = computeClipCostUsd({ elevenlabsChars, heygenDurationSec, remotionDurationSec: totalDurationSec });
+        await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags, costUsd: costBreakdown.total, metadata: { ...clipMeta, costBreakdown } } });
         thumbnailService.extractAndSave(clipId, outputUrl).catch((e) => logger.error("Thumbnail failed (hybrid)", { clipId, error: String(e) }));
-        logger.info("Hybrid clip recovered and ready", { clipId, outputUrl });
+        logger.info("Hybrid clip recovered and ready", { clipId, outputUrl, costUsd: costBreakdown.total });
       }).catch(async (err) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED", metadata: { ...meta, heygenVideoUrl: videoUrl, renderError: errMsg } } });
@@ -135,9 +139,12 @@ export async function recoverHeygenClip(clipId: string): Promise<RecoveryResult>
     }).then(async (outputUrl) => {
       const caption = (reelScriptData.caption as string | undefined) ?? null;
       const hashtags = Array.isArray(reelScriptData.hashtags) ? (reelScriptData.hashtags as string[]) : [];
-      await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags } });
+      const clipMeta = (await db.repurposedClip.findUnique({ where: { id: clipId }, select: { metadata: true } }))?.metadata as Record<string, unknown> | null ?? {};
+      const elevenlabsChars = clipMeta.elevenlabsChars as number | undefined;
+      const costBreakdown = computeClipCostUsd({ elevenlabsChars, heygenDurationSec, remotionDurationSec: durationSec });
+      await db.repurposedClip.update({ where: { id: clipId }, data: { storagePath: outputUrl, status: "READY", postCopy: caption, hashtags, costUsd: costBreakdown.total, metadata: { ...clipMeta, costBreakdown } } });
       thumbnailService.extractAndSave(clipId, outputUrl).catch((e) => logger.error("Thumbnail failed", { clipId, error: String(e) }));
-      logger.info("Type 2 clip recovered and ready", { clipId, outputUrl });
+      logger.info("Type 2 clip recovered and ready", { clipId, outputUrl, costUsd: costBreakdown.total });
     }).catch(async (err) => {
       const errMsg = err instanceof Error ? err.message : String(err);
       await db.repurposedClip.update({ where: { id: clipId }, data: { status: "FAILED", metadata: { ...meta, heygenVideoUrl: videoUrl, renderError: errMsg } } });

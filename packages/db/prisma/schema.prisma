@@ -223,6 +223,7 @@ model RepurposedClip {
   updatedAt           DateTime              @updatedAt
   thumbnailUrl        String?
   thumbnailCandidates String[]              @default([])
+  costUsd             Float?                // Estimated pipeline cost (ElevenLabs + HeyGen + Remotion)
   calendarItems       ContentCalendarItem[]
   script              Script?               @relation(fields: [scriptId], references: [id])
   video               UploadedVideo         @relation(fields: [videoId], references: [id], onDelete: Cascade)

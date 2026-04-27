@@ -8,6 +8,7 @@ import { db } from "@contentforge/db";
 import { remotionRenderService } from "@/lib/integrations/remotion/service";
 import { thumbnailService } from "@/lib/integrations/thumbnail/service";
 import { createLogger } from "@/lib/integrations/shared/logger";
+import { computeClipCostUsd } from "@/lib/costs";
 
 export const maxDuration = 300;
 
@@ -151,6 +152,9 @@ export async function POST(req: Request) {
               const hashtags = Array.isArray(reelScriptData.hashtags)
                 ? (reelScriptData.hashtags as string[])
                 : [];
+              const clipMeta = (lipsyncClip.metadata as Record<string, unknown> | null) ?? {};
+              const elevenlabsChars = clipMeta.elevenlabsChars as number | undefined;
+              const costBreakdown = computeClipCostUsd({ elevenlabsChars, heygenDurationSec: payload.event_data.duration, remotionDurationSec: totalDurationSec });
               await db.repurposedClip.update({
                 where: { id: lipsyncClip.id },
                 data: {
@@ -158,12 +162,14 @@ export async function POST(req: Request) {
                   status: 'READY',
                   postCopy: caption,
                   hashtags,
+                  costUsd: costBreakdown.total,
+                  metadata: { ...clipMeta, costBreakdown },
                 },
               });
               // Trigger thumbnail extraction non-blocking (fires inside the waitUntil scope)
               thumbnailService.extractAndSave(lipsyncClip.id, outputUrl)
                 .catch(err => logger.error('Thumbnail extraction failed (hybrid)', { clipId: lipsyncClip.id, error: String(err) }));
-              logger.info("Hybrid clip ready", { clipId: lipsyncClip.id, outputUrl });
+              logger.info("Hybrid clip ready", { clipId: lipsyncClip.id, outputUrl, costUsd: costBreakdown.total });
             })
             .catch(async (err) => {
               const errMsg = err instanceof Error ? err.message : String(err);
@@ -200,6 +206,9 @@ export async function POST(req: Request) {
             const hashtags = Array.isArray(reelScriptData.hashtags)
               ? (reelScriptData.hashtags as string[])
               : [];
+            const clipMeta = (lipsyncClip.metadata as Record<string, unknown> | null) ?? {};
+            const elevenlabsChars = clipMeta.elevenlabsChars as number | undefined;
+            const costBreakdown = computeClipCostUsd({ elevenlabsChars, heygenDurationSec: payload.event_data.duration, remotionDurationSec: durationSec });
             await db.repurposedClip.update({
               where: { id: lipsyncClip.id },
               data: {
@@ -207,12 +216,14 @@ export async function POST(req: Request) {
                 status: 'READY',
                 postCopy: caption,
                 hashtags,
+                costUsd: costBreakdown.total,
+                metadata: { ...clipMeta, costBreakdown },
               },
             });
             // Trigger thumbnail extraction non-blocking (fires inside the waitUntil scope)
             thumbnailService.extractAndSave(lipsyncClip.id, outputUrl)
               .catch(err => logger.error('Thumbnail extraction failed (type2)', { clipId: lipsyncClip.id, error: String(err) }));
-            logger.info("Type 2 clip ready", { clipId: lipsyncClip.id, outputUrl });
+            logger.info("Type 2 clip ready", { clipId: lipsyncClip.id, outputUrl, costUsd: costBreakdown.total });
           })
           .catch(async (err) => {
             const errMsg = err instanceof Error ? err.message : String(err);
