@@ -47,7 +47,7 @@ export async function GET(req: Request) {
       platform: "INSTAGRAM",
       status: { in: ["SCHEDULED", "DRAFT"] },
       scheduledFor: { lte: now },
-      scheduledPost: { postizPostId: null, socialAccountId: { not: null } },
+      scheduledPost: { postizPostId: null },
     },
     include: {
       scheduledPost: true,
