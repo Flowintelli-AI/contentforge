@@ -137,13 +137,8 @@ function ScheduleModal({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const scheduleMutation = api.videos.scheduleClip.useMutation({
-    onSuccess: (data) => {
-      if (data.igWarning) {
-        toast.success("Clip saved to calendar ✅");
-        toast.error(`Instagram: ${data.igWarning}`, { duration: 6000 });
-      } else {
-        toast.success("Clip scheduled to Instagram 🎉");
-      }
+    onSuccess: () => {
+      toast.success("Clip scheduled to Instagram 🎉");
       onSuccess();
     },
     onError: (e) => toast.error(e.message),
