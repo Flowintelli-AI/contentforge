@@ -4,16 +4,6 @@
   "buildCommand": "npx next build",
   "outputDirectory": ".next",
   "regions": ["iad1"],
-  "crons": [
-    {
-      "path": "/api/cron/heygen-recover",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/instagram-publish",
-      "schedule": "*/5 * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/api/webhooks/(.*)",

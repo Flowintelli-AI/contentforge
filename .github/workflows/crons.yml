@@ -1,0 +1,24 @@
+name: Cron Jobs
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  run-crons:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instagram Publish Cron
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/instagram-publish" \
+            -o /dev/null -w "instagram-publish: %{http_code}\n" || true
+
+      - name: HeyGen Recover Cron
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/heygen-recover" \
+            -o /dev/null -w "heygen-recover: %{http_code}\n" || true
