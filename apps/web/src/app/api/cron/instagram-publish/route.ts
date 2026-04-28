@@ -41,13 +41,13 @@ export async function GET(req: Request) {
 
   const now = new Date();
 
-  // Find SCHEDULED items due now that haven't been sent to Instagram yet
+  // Find SCHEDULED (or DRAFT with a scheduledPost) items due now that haven't been sent to Instagram yet
   const duePosts = await db.contentCalendarItem.findMany({
     where: {
       platform: "INSTAGRAM",
-      status: "SCHEDULED",
+      status: { in: ["SCHEDULED", "DRAFT"] },
       scheduledFor: { lte: now },
-      scheduledPost: { postizPostId: null },
+      scheduledPost: { postizPostId: null, socialAccountId: { not: null } },
     },
     include: {
       scheduledPost: true,
