@@ -216,7 +216,7 @@ export const videosRouter = createTRPCRouter({
       // If the IG API call fails (expired token, scope issue, etc.), we still save to DB
       // as PENDING and a cron job will retry at publish time.
       let containerId: string | null = null;
-      let postStatus: "SCHEDULED" | "PENDING" = "PENDING";
+      let postStatus: "SCHEDULED" | "DRAFT" = "DRAFT";
       let igError: string | null = null;
       try {
         containerId = await createReelsContainer(
@@ -230,7 +230,7 @@ export const videosRouter = createTRPCRouter({
       } catch (err) {
         igError = err instanceof Error ? err.message : String(err);
         console.error("[scheduleClip] Instagram container creation failed:", igError);
-        // Continue — save to DB as PENDING for cron retry
+        // Continue — save to DB as DRAFT for cron retry
       }
 
       // Persist to DB regardless of IG API result
@@ -241,7 +241,7 @@ export const videosRouter = createTRPCRouter({
           title: clip.title ?? "Instagram Reel",
           scheduledFor: input.scheduledFor,
           platform: "INSTAGRAM",
-          status: postStatus === "SCHEDULED" ? "SCHEDULED" : "PENDING",
+          status: postStatus === "SCHEDULED" ? "SCHEDULED" : "DRAFT",
           scheduledPost: {
             create: {
               socialAccountId: socialAccount.id,
