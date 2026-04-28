@@ -37,6 +37,7 @@ import {
   Image as ImageIcon,
   Loader2,
   X,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -74,7 +75,7 @@ type CalItem = {
   platform: string;
   status: string;
   clip: { id: string; title: string | null; thumbnailUrl: string | null; storagePath: string | null } | null;
-  scheduledPost: { status: string; postUrl: string | null } | null;
+  scheduledPost: { status: string; postUrl: string | null; failureReason: string | null } | null;
 };
 
 // ─── Draggable Clip Card ───────────────────────────────────────────────────────
@@ -197,6 +198,9 @@ function DroppableDay({
               <span className={cn("text-[10px] truncate flex-1", colors.text)}>
                 {item.title.slice(0, 18)}
               </span>
+              {item.status === "FAILED" && (
+                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-red-500" title="Publish failed" />
+              )}
             </div>
           );
         })}
@@ -367,7 +371,10 @@ function ItemDetailPanel({
 
           <div className="flex items-center gap-2">
             <Badge className={cn(colors.bg, colors.text, "border-0")}>{item.platform}</Badge>
-            <Badge variant={item.status === "SCHEDULED" ? "default" : "secondary"} className="text-xs">
+            <Badge
+              variant={item.status === "SCHEDULED" ? "default" : item.status === "FAILED" ? "destructive" : "secondary"}
+              className="text-xs"
+            >
               {item.status}
             </Badge>
             {item.scheduledPost?.postUrl && (
@@ -385,6 +392,17 @@ function ItemDetailPanel({
           <div className="text-sm text-muted-foreground">
             Scheduled: {format(new Date(item.scheduledFor), "PPp")}
           </div>
+
+          {/* Failure reason alert */}
+          {item.status === "FAILED" && item.scheduledPost?.failureReason && (
+            <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-red-800">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-medium mb-0.5">Instagram publish failed</p>
+                <p className="opacity-80">{item.scheduledPost.failureReason}</p>
+              </div>
+            </div>
+          )}
 
           {/* Reschedule */}
           <div className="space-y-1.5">

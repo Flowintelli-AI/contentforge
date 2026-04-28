@@ -28,7 +28,7 @@ export const calendarRouter = createTRPCRouter({
         include: {
           script: { select: { title: true } },
           clip: { select: { id: true, title: true, thumbnailUrl: true, storagePath: true } },
-          scheduledPost: { select: { status: true, postUrl: true } },
+          scheduledPost: { select: { status: true, postUrl: true, failureReason: true } },
         },
         orderBy: { scheduledFor: "asc" },
       });

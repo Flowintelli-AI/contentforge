@@ -64,63 +64,82 @@ export async function GET(req: Request) {
 
   const results = await Promise.allSettled(
     duePosts.map(async (item) => {
-      if (!item.scheduledPost) throw new Error("No scheduledPost record");
-      if (!item.clip?.storagePath) throw new Error("Clip has no video URL");
+      try {
+        if (!item.scheduledPost) throw new Error("No scheduledPost record");
+        if (!item.clip?.storagePath) throw new Error("Clip has no video URL");
 
-      // Get Instagram connection for this creator
-      const igConn = await db.igConnection.findUnique({
-        where: { creatorId: item.creatorId },
-      });
-      if (!igConn) throw new Error("No Instagram connection");
+        // Get Instagram connection for this creator
+        const igConn = await db.igConnection.findUnique({
+          where: { creatorId: item.creatorId },
+        });
+        if (!igConn) throw new Error("No Instagram connection");
 
-      const caption = [
-        item.clip.postCopy ?? item.title,
-        item.clip.hashtags?.length
-          ? "\n\n" + item.clip.hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h}`)).join(" ")
-          : "",
-      ]
-        .join("")
-        .trim();
+        const caption = [
+          item.clip.postCopy ?? item.title,
+          item.clip.hashtags?.length
+            ? "\n\n" + item.clip.hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h}`)).join(" ")
+            : "",
+        ]
+          .join("")
+          .trim();
 
-      // Create container for immediate publish (no native scheduling — more reliable)
-      const params = new URLSearchParams({
-        media_type: "REELS",
-        video_url: item.clip.storagePath,
-        caption,
-        access_token: igConn.accessToken,
-      });
-      const createRes = await fetch(`https://graph.instagram.com/${igConn.igUserId}/media`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params.toString(),
-      });
-      const createData = (await createRes.json()) as { id?: string; error?: { message: string } };
-      if (!createData.id) {
-        throw new Error(createData.error?.message ?? `Container create HTTP ${createRes.status}`);
+        // Create container for immediate publish
+        const params = new URLSearchParams({
+          media_type: "REELS",
+          video_url: item.clip.storagePath,
+          caption,
+          access_token: igConn.accessToken,
+        });
+        const createRes = await fetch(`https://graph.instagram.com/${igConn.igUserId}/media`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+        const createData = (await createRes.json()) as { id?: string; error?: { message: string } };
+        if (!createData.id) {
+          throw new Error(createData.error?.message ?? `Container create HTTP ${createRes.status}`);
+        }
+        const containerId = createData.id;
+
+        // Wait for video processing
+        const containerResult = await waitForContainer(igConn.accessToken, containerId);
+        if (containerResult !== "FINISHED") {
+          throw new Error(`Container did not reach FINISHED status: ${containerResult}`);
+        }
+
+        // Publish
+        const mediaId = await publishContainer(igConn.accessToken, igConn.igUserId, containerId);
+
+        // Update DB — success
+        await db.scheduledPost.update({
+          where: { id: item.scheduledPost.id },
+          data: { postizPostId: mediaId, status: "PUBLISHED", publishedAt: new Date() },
+        });
+        await db.contentCalendarItem.update({
+          where: { id: item.id },
+          data: { status: "PUBLISHED" },
+        });
+
+        logger.info("Published", { calendarItemId: item.id, mediaId });
+        return { calendarItemId: item.id, mediaId };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.error("Publish failed", { calendarItemId: item.id, reason });
+
+        // Persist failure so the UI can show why
+        if (item.scheduledPost) {
+          await db.scheduledPost.update({
+            where: { id: item.scheduledPost.id },
+            data: { status: "FAILED", failureReason: reason },
+          }).catch(() => {});
+        }
+        await db.contentCalendarItem.update({
+          where: { id: item.id },
+          data: { status: "FAILED" },
+        }).catch(() => {});
+
+        throw err;
       }
-      const containerId = createData.id;
-
-      // Wait for video processing
-      const containerResult = await waitForContainer(igConn.accessToken, containerId);
-      if (containerResult !== "FINISHED") {
-        throw new Error(`Container did not reach FINISHED status: ${containerResult}`);
-      }
-
-      // Publish
-      const mediaId = await publishContainer(igConn.accessToken, igConn.igUserId, containerId);
-
-      // Update DB
-      await db.scheduledPost.update({
-        where: { id: item.scheduledPost.id },
-        data: { postizPostId: mediaId, status: "PUBLISHED", publishedAt: new Date() },
-      });
-      await db.contentCalendarItem.update({
-        where: { id: item.id },
-        data: { status: "PUBLISHED" },
-      });
-
-      logger.info("Published", { calendarItemId: item.id, mediaId });
-      return { calendarItemId: item.id, mediaId };
     })
   );
 
