@@ -212,16 +212,28 @@ export const videosRouter = createTRPCRouter({
         .join("")
         .trim();
 
-      // Create Instagram Reels container (scheduled)
-      const containerId = await createReelsContainer(
-        igConn.accessToken,
-        igConn.igUserId,
-        clip.storagePath,
-        fullCaption,
-        input.scheduledFor.getTime()
-      );
+      // Try to create Instagram Reels container immediately — but don't block on failure.
+      // If the IG API call fails (expired token, scope issue, etc.), we still save to DB
+      // as PENDING and a cron job will retry at publish time.
+      let containerId: string | null = null;
+      let postStatus: "SCHEDULED" | "PENDING" = "PENDING";
+      let igError: string | null = null;
+      try {
+        containerId = await createReelsContainer(
+          igConn.accessToken,
+          igConn.igUserId,
+          clip.storagePath,
+          fullCaption,
+          input.scheduledFor.getTime()
+        );
+        postStatus = "SCHEDULED";
+      } catch (err) {
+        igError = err instanceof Error ? err.message : String(err);
+        console.error("[scheduleClip] Instagram container creation failed:", igError);
+        // Continue — save to DB as PENDING for cron retry
+      }
 
-      // Persist to DB
+      // Persist to DB regardless of IG API result
       const calendarItem = await ctx.db.contentCalendarItem.create({
         data: {
           creatorId: profile.id,
@@ -229,12 +241,12 @@ export const videosRouter = createTRPCRouter({
           title: clip.title ?? "Instagram Reel",
           scheduledFor: input.scheduledFor,
           platform: "INSTAGRAM",
-          status: "SCHEDULED",
+          status: postStatus === "SCHEDULED" ? "SCHEDULED" : "PENDING",
           scheduledPost: {
             create: {
               socialAccountId: socialAccount.id,
               postizPostId: containerId,
-              status: "SCHEDULED",
+              status: postStatus,
             },
           },
         },
@@ -245,6 +257,9 @@ export const videosRouter = createTRPCRouter({
         calendarItemId: calendarItem.id,
         containerId,
         scheduledFor: input.scheduledFor,
+        igWarning: igError
+          ? `Scheduled locally — Instagram API error: ${igError}`
+          : undefined,
       };
     }),
 });
