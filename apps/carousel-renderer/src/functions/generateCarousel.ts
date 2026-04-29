@@ -38,7 +38,19 @@ async function generateCarousel(
 
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    const contentType = req.headers.get('content-type') ?? '';
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const text = await req.text();
+      body = Object.fromEntries(new URLSearchParams(text).entries());
+    } else {
+      body = (await req.json()) as Record<string, unknown>;
+    }
+    // Decode URL-encoded values (Make.com uses encodeURL() to safely embed strings in raw JSON)
+    for (const key of ['article_title', 'article_body']) {
+      if (typeof body[key] === 'string') {
+        try { body[key] = decodeURIComponent(body[key] as string); } catch { /* leave as-is */ }
+      }
+    }
   } catch {
     return {
       status: 400,
@@ -103,6 +115,7 @@ async function generateCarousel(
       body: JSON.stringify({
         pdf_base64: result.pdf_base64,
         slides_png_urls: result.slides_png_urls,
+        slides_cloudinary_urls: result.slides_cloudinary_urls,
         format: input.format,
         caption: input.caption,
         slides: input.slides,
