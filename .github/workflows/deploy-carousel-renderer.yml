@@ -18,21 +18,22 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Install & build carousel-renderer
         working-directory: apps/carousel-renderer
-        # Use --ignore-scripts to skip root workspace postinstall (prisma generate)
-        # @resvg/resvg-js bundles pre-built linux-x64 binaries — no postinstall needed
-        run: npm ci --ignore-scripts
-
-      - name: Build
-        working-directory: apps/carousel-renderer
-        run: npm run build
+        run: |
+          # Install production deps locally (not in workspace root) so node_modules is
+          # self-contained for deployment. --ignore-scripts skips prisma postinstall.
+          npm install --production --ignore-scripts --no-workspaces
+          # Build TypeScript
+          npx tsc
 
       - name: Create deployment zip
         working-directory: apps/carousel-renderer
         run: |
-          # Include built output + node_modules (needed for native WASM binaries)
-          zip -r ../../carousel-deploy.zip dist/ node_modules/ host.json package.json
+          # node_modules must be included because @resvg/resvg-js has native WASM binaries
+          zip -r /tmp/carousel-deploy.zip dist/ node_modules/ host.json package.json
+          echo "Zip size: $(du -sh /tmp/carousel-deploy.zip | cut -f1)"
+          echo "node_modules/@resvg present: $(ls node_modules/@resvg 2>/dev/null || echo 'MISSING')"
 
       - name: Deploy via Kudu zipdeploy
         env:
@@ -46,7 +47,7 @@ jobs:
             "https://flowintelli-carousel.scm.azurewebsites.net/api/zipdeploy?isAsync=false" \
             --netrc \
             -H "Content-Type: application/octet-stream" \
-            --data-binary @carousel-deploy.zip \
+            --data-binary @/tmp/carousel-deploy.zip \
             -f \
             -w "\nHTTP %{http_code}\n"
           rm -f ~/.netrc
