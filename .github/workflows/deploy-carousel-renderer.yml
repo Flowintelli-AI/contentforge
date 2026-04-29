@@ -21,11 +21,14 @@ jobs:
       - name: Install & build carousel-renderer
         working-directory: apps/carousel-renderer
         run: |
-          # Install production deps locally (not in workspace root) so node_modules is
-          # self-contained for deployment. --ignore-scripts skips prisma postinstall.
-          npm install --production --ignore-scripts --no-workspaces
-          # Build TypeScript
-          npx tsc
+          # Install ALL deps (including devDeps for TypeScript compiler).
+          # --no-workspaces forces local node_modules (not workspace root).
+          # --ignore-scripts skips prisma postinstall at root.
+          npm install --ignore-scripts --no-workspaces
+          # Compile TypeScript
+          ./node_modules/.bin/tsc
+          # Remove devDeps — production-only node_modules in the zip
+          npm prune --production --ignore-scripts
 
       - name: Create deployment zip
         working-directory: apps/carousel-renderer
