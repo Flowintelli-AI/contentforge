@@ -20,7 +20,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: apps/carousel-renderer
-        run: npm ci
+        # Use --ignore-scripts to skip root workspace postinstall (prisma generate)
+        # @resvg/resvg-js bundles pre-built linux-x64 binaries — no postinstall needed
+        run: npm ci --ignore-scripts
 
       - name: Build
         working-directory: apps/carousel-renderer
