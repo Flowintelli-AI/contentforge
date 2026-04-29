@@ -18,25 +18,31 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install & build carousel-renderer
-        working-directory: apps/carousel-renderer
+      - name: Install, build & package carousel-renderer
         run: |
-          # Install ALL deps (including devDeps for TypeScript compiler).
-          # --no-workspaces forces local node_modules (not workspace root).
-          # --ignore-scripts skips prisma postinstall at root.
-          npm install --ignore-scripts --no-workspaces
+          # Copy to /tmp to escape monorepo workspace hoisting entirely.
+          # npm install inside a workspace dir always hoists to repo root node_modules,
+          # even with --no-workspaces. Running outside the repo avoids this.
+          mkdir -p /tmp/carousel-build
+          cp -r apps/carousel-renderer/. /tmp/carousel-build/
+          cd /tmp/carousel-build
+
+          # Install all deps (devDeps needed for tsc), ignore scripts to skip prisma
+          npm install --ignore-scripts
+
           # Compile TypeScript
           ./node_modules/.bin/tsc
-          # Remove devDeps — production-only node_modules in the zip
+
+          # Remove devDeps before zipping
           npm prune --production --ignore-scripts
 
-      - name: Create deployment zip
-        working-directory: apps/carousel-renderer
-        run: |
-          # node_modules must be included because @resvg/resvg-js has native WASM binaries
+          # Sanity check — @resvg/resvg-js should be several MB
+          echo "=== node_modules size: $(du -sh node_modules/ | cut -f1) ==="
+          ls node_modules/@resvg/ 2>/dev/null || echo "WARNING: @resvg MISSING"
+
+          # node_modules must be included — @resvg/resvg-js has native linux-x64 WASM binaries
           zip -r /tmp/carousel-deploy.zip dist/ node_modules/ host.json package.json
-          echo "Zip size: $(du -sh /tmp/carousel-deploy.zip | cut -f1)"
-          echo "node_modules/@resvg present: $(ls node_modules/@resvg 2>/dev/null || echo 'MISSING')"
+          echo "=== Zip size: $(du -sh /tmp/carousel-deploy.zip | cut -f1) ==="
 
       - name: Deploy via Kudu zipdeploy
         env:
