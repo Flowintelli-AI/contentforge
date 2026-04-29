@@ -1,0 +1,60 @@
+name: Deploy Carousel Renderer
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/carousel-renderer/**'
+      - '.github/workflows/deploy-carousel-renderer.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: apps/carousel-renderer
+        run: npm ci
+
+      - name: Build
+        working-directory: apps/carousel-renderer
+        run: npm run build
+
+      - name: Create deployment zip
+        working-directory: apps/carousel-renderer
+        run: |
+          # Include built output + node_modules (needed for native WASM binaries)
+          zip -r ../../carousel-deploy.zip dist/ node_modules/ host.json package.json
+
+      - name: Deploy via Kudu zipdeploy
+        run: |
+          curl -X POST \
+            "https://flowintelli-carousel.scm.azurewebsites.net/api/zipdeploy?isAsync=false" \
+            -u "${{ secrets.AZURE_CAROUSEL_SCM_USER }}:${{ secrets.AZURE_CAROUSEL_SCM_PASS }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @carousel-deploy.zip \
+            -f \
+            -w "\nHTTP %{http_code}\n"
+
+      - name: Verify function is live
+        run: |
+          sleep 15
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "x-api-key: ${{ secrets.CAROUSEL_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"article_title":"CI test","article_body":"smoke test body text for deployment verification"}' \
+            "https://flowintelli-carousel.azurewebsites.net/api/generatecarousel")
+          echo "Function responded: HTTP $HTTP"
+          # 200 = success, 502 = GPT key missing in env (still means function loaded)
+          if [ "$HTTP" != "200" ] && [ "$HTTP" != "502" ]; then
+            echo "ERROR: unexpected status $HTTP — deploy may have failed"
+            exit 1
+          fi
+          echo "Deploy verified ✓"
