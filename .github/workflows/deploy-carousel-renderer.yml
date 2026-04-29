@@ -40,8 +40,18 @@ jobs:
           echo "=== node_modules size: $(du -sh node_modules/ | cut -f1) ==="
           ls node_modules/@resvg/ 2>/dev/null || echo "WARNING: @resvg MISSING"
 
+          # Download Poppins fonts (excluded from git, must be bundled for Azure)
+          BASE="https://raw.githubusercontent.com/google/fonts/47831f08ec6d6d7ad6b465f23dc9f9a890a2a04b/ofl/poppins"
+          mkdir -p fonts
+          curl -sL "$BASE/Poppins-ExtraBold.ttf" -o fonts/Poppins-ExtraBold.ttf
+          curl -sL "$BASE/Poppins-SemiBold.ttf"  -o fonts/Poppins-SemiBold.ttf
+          curl -sL "$BASE/Poppins-Medium.ttf"    -o fonts/Poppins-Medium.ttf
+          curl -sL "$BASE/Poppins-Regular.ttf"   -o fonts/Poppins-Regular.ttf
+          echo "=== Font sizes: $(du -sh fonts/*.ttf) ==="
+
           # node_modules must be included — @resvg/resvg-js has native linux-x64 WASM binaries
-          zip -r /tmp/carousel-deploy.zip dist/ node_modules/ host.json package.json
+          # fonts/ must be included — excluded from git, loaded at runtime via readFileSync
+          zip -r /tmp/carousel-deploy.zip dist/ node_modules/ fonts/ host.json package.json
           echo "=== Zip size: $(du -sh /tmp/carousel-deploy.zip | cut -f1) ==="
 
       - name: Deploy via Kudu zipdeploy
@@ -71,9 +81,8 @@ jobs:
             -d '{"article_title":"CI test","article_body":"smoke test body text for deployment verification"}' \
             "https://flowintelli-carousel.azurewebsites.net/api/generatecarousel")
           echo "Function responded: HTTP $HTTP"
-          # 200 = success, 502 = GPT key missing in env (still means function loaded)
-          if [ "$HTTP" != "200" ] && [ "$HTTP" != "502" ]; then
-            echo "ERROR: unexpected status $HTTP — deploy may have failed"
+          if [ "$HTTP" != "200" ]; then
+            echo "ERROR: expected HTTP 200, got $HTTP — function may be broken"
             exit 1
           fi
           echo "Deploy verified ✓"
