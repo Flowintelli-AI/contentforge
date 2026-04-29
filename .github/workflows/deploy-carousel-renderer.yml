@@ -35,14 +35,21 @@ jobs:
           zip -r ../../carousel-deploy.zip dist/ node_modules/ host.json package.json
 
       - name: Deploy via Kudu zipdeploy
+        env:
+          SCM_USER: ${{ secrets.AZURE_CAROUSEL_SCM_USER }}
+          SCM_PASS: ${{ secrets.AZURE_CAROUSEL_SCM_PASS }}
         run: |
+          # Write to .netrc to avoid $ in username being interpreted by bash
+          printf 'machine flowintelli-carousel.scm.azurewebsites.net login %s password %s\n' "$SCM_USER" "$SCM_PASS" > ~/.netrc
+          chmod 600 ~/.netrc
           curl -X POST \
             "https://flowintelli-carousel.scm.azurewebsites.net/api/zipdeploy?isAsync=false" \
-            -u "${{ secrets.AZURE_CAROUSEL_SCM_USER }}:${{ secrets.AZURE_CAROUSEL_SCM_PASS }}" \
+            --netrc \
             -H "Content-Type: application/octet-stream" \
             --data-binary @carousel-deploy.zip \
             -f \
             -w "\nHTTP %{http_code}\n"
+          rm -f ~/.netrc
 
       - name: Verify function is live
         run: |
