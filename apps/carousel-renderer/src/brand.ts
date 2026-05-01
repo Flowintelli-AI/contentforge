@@ -50,6 +50,13 @@ export const SAFE_HEIGHT = BRAND.canvas.height - BRAND.safe.top - BRAND.safe.bot
  * Phase 4 — PRACTICAL  (slides 6-9) Practical information + recap bridge
  * Phase 5 — CTA        (slide 10)   Simple CTA — exactly 1 action, never multiple
  */
+export type Platform = 'instagram' | 'linkedin';
+
+export interface PlatformFitness {
+  instagram: number; // 0–100
+  linkedin: number;  // 0–100
+}
+
 export type SlideType = 'hook' | 'example' | 'diagram' | 'practical' | 'cta';
 
 export interface SlideData {
@@ -75,5 +82,6 @@ export interface SlideData {
 export interface CarouselInput {
   format: 'comparison' | 'tutorial' | 'native' | 'compilation' | 'story';
   caption: string;
-  slides: SlideData[];   // always exactly 10
+  platform_fitness: PlatformFitness; // advisory — scored by GPT, computed recommendation in code
+  slides: SlideData[];               // always exactly 10
 }

@@ -78,7 +78,7 @@ jobs:
             -X POST \
             -H "x-api-key: ${{ secrets.CAROUSEL_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d '{"article_title":"CI test","article_body":"smoke test body text for deployment verification"}' \
+            -d '{"article_title":"CI test","article_body":"smoke test body text for deployment verification","platform":"instagram"}' \
             "https://flowintelli-carousel.azurewebsites.net/api/generatecarousel")
           echo "Function responded: HTTP $HTTP"
           if [ "$HTTP" != "200" ]; then
