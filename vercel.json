@@ -1,8 +1,8 @@
 {
   "framework": "nextjs",
   "installCommand": "npm install",
-  "buildCommand": "npx next build",
-  "outputDirectory": ".next",
+  "buildCommand": "cd apps/web && npx next build",
+  "outputDirectory": "apps/web/.next",
   "regions": ["iad1"],
   "crons": [
     {
