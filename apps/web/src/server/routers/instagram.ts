@@ -208,4 +208,103 @@ export const instagramRouter = router({
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
         .slice(0, input.limit);
     }),
+
+  /**
+   * Get per-post Instagram Insights for all published content.
+   * Fetches lifetime metrics (impressions, reach, plays, likes, comments, shares)
+   * from the Instagram Graph API using the saved IgConnection token.
+   */
+  getAnalytics: protectedProcedure.query(async ({ ctx }) => {
+    const profile = await getProfile(ctx);
+
+    const conn = await ctx.db.igConnection.findUnique({
+      where: { creatorId: profile.id },
+      select: { accessToken: true, igUsername: true },
+    });
+    if (!conn) return { connected: false as const, posts: [], summary: null };
+
+    // Find all published calendar items that have a media ID (stored in postizPostId)
+    const publishedItems = await ctx.db.contentCalendarItem.findMany({
+      where: { creatorId: profile.id, status: "PUBLISHED" },
+      orderBy: { scheduledFor: "desc" },
+      take: 50,
+      include: {
+        clip: { select: { thumbnailUrl: true, title: true } },
+        scheduledPost: { select: { postizPostId: true, postUrl: true, publishedAt: true } },
+      },
+    });
+
+    // Build per-post insights by calling IG Graph API
+    const IG_BASE = "https://graph.instagram.com/v21.0";
+    const METRICS = "impressions,reach,plays,likes,comments,shares,saved";
+
+    const posts = await Promise.all(
+      publishedItems.map(async (item) => {
+        const mediaId = item.scheduledPost?.postizPostId;
+        const base = {
+          id: item.id,
+          title: item.title,
+          scheduledFor: item.scheduledFor,
+          publishedAt: item.scheduledPost?.publishedAt ?? null,
+          postUrl: item.scheduledPost?.postUrl ?? null,
+          thumbnailUrl: item.clip?.thumbnailUrl ?? null,
+          mediaId,
+          impressions: null as number | null,
+          reach: null as number | null,
+          plays: null as number | null,
+          likes: null as number | null,
+          comments: null as number | null,
+          shares: null as number | null,
+          saved: null as number | null,
+        };
+
+        if (!mediaId) return base;
+
+        try {
+          const res = await fetch(
+            `${IG_BASE}/${mediaId}/insights?metric=${METRICS}&period=lifetime&access_token=${conn.accessToken}`
+          );
+          if (!res.ok) return base;
+          const json = (await res.json()) as {
+            data?: Array<{ name: string; values?: Array<{ value: number }>; value?: number }>;
+          };
+
+          for (const metric of json.data ?? []) {
+            const value = metric.value ?? metric.values?.[0]?.value ?? 0;
+            if (metric.name === "impressions") base.impressions = value;
+            if (metric.name === "reach") base.reach = value;
+            if (metric.name === "plays") base.plays = value;
+            if (metric.name === "likes") base.likes = value;
+            if (metric.name === "comments") base.comments = value;
+            if (metric.name === "shares") base.shares = value;
+            if (metric.name === "saved") base.saved = value;
+          }
+        } catch {
+          // Return base data even if insights fail for one post
+        }
+
+        return base;
+      })
+    );
+
+    // Build summary stats
+    const withData = posts.filter((p) => p.impressions !== null);
+    const summary =
+      withData.length === 0
+        ? null
+        : {
+            totalPosts: posts.length,
+            totalImpressions: withData.reduce((s, p) => s + (p.impressions ?? 0), 0),
+            totalReach: withData.reduce((s, p) => s + (p.reach ?? 0), 0),
+            totalPlays: withData.reduce((s, p) => s + (p.plays ?? 0), 0),
+            avgEngagementRate:
+              withData.reduce((s, p) => {
+                const eng = (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0);
+                const reach = p.reach ?? 1;
+                return s + eng / reach;
+              }, 0) / withData.length,
+          };
+
+    return { connected: true as const, posts, summary };
+  }),
 });

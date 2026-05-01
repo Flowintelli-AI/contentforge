@@ -64,6 +64,8 @@ model CreatorProfile {
   niches          NicheOnCreator[]
   socialAccounts  SocialAccount[]
   videos          UploadedVideo[]
+  inspireNiches   InspireNiche[]
+  inspireAccounts InspireAccount[]
 }
 
 model Niche {
@@ -223,6 +225,7 @@ model RepurposedClip {
   updatedAt           DateTime              @updatedAt
   thumbnailUrl        String?
   thumbnailCandidates String[]              @default([])
+  captionStyle        String?               // KARAOKE | HIGHLIGHT | CLEAN
   costUsd             Float?                // Estimated pipeline cost (ElevenLabs + HeyGen + Remotion)
   calendarItems       ContentCalendarItem[]
   script              Script?               @relation(fields: [scriptId], references: [id])
@@ -556,3 +559,37 @@ enum ReviewStatus {
   REJECTED
   REVISION_REQUESTED
 }
+
+// ─── Inspire / Trend Spy ──────────────────────────────────────────────────────
+
+// A niche hashtag the creator is tracking for trend intelligence
+model InspireNiche {
+  id          String         @id @default(cuid())
+  creatorId   String
+  hashtag     String         // without # e.g. "fitness"
+  lastFetched DateTime?
+  posts       Json           @default("[]") // ScrapedPost[]
+  createdAt   DateTime       @default(now())
+  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, hashtag])
+  @@index([creatorId])
+}
+
+// A competitor or role-model Instagram account the creator is watching
+model InspireAccount {
+  id             String         @id @default(cuid())
+  creatorId      String
+  username       String         // without @ e.g. "garyvee"
+  displayName    String?
+  avatarUrl      String?
+  followersCount Int?
+  lastFetched    DateTime?
+  posts          Json           @default("[]") // ScrapedPost[]
+  createdAt      DateTime       @default(now())
+  creator        CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, username])
+  @@index([creatorId])
+}
+

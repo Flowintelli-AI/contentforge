@@ -7,7 +7,7 @@ import { UserButton } from "@clerk/nextjs";
 import { trpc } from "@/lib/trpc/client";
 import {
   LayoutDashboard, Lightbulb, FileText, Video,
-  Calendar, Zap, BookOpen, Settings, BarChart3, Users,
+  Calendar, Zap, BookOpen, Settings, BarChart3, Users, TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/dashboard/subscribers",    icon: Users,           label: "Subscribers" },
   { href: "/dashboard/blog",           icon: BookOpen,        label: "Blog" },
   { href: "/dashboard/analytics",      icon: BarChart3,       label: "Analytics" },
+  { href: "/dashboard/inspire",        icon: TrendingUp,      label: "Inspire" },
   { href: "/dashboard/settings",       icon: Settings,        label: "Settings" },
 ];
 
