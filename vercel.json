@@ -7,11 +7,11 @@
   "crons": [
     {
       "path": "/api/cron/instagram-publish",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/extract-thumbnails",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 9 * * *"
     },
     {
       "path": "/api/cron/instagram-token-refresh",
