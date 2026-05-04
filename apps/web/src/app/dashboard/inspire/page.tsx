@@ -19,11 +19,13 @@ import {
   MessageCircle,
   Play,
   TrendingUp,
+  Flame,
+  Trophy,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import Image from "next/image";
 
-// ─── Post card ────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Post = {
   id: string;
@@ -41,14 +43,42 @@ type Post = {
   type: string;
 };
 
-function PostCard({ post }: { post: Post }) {
+// ─── Virality score ───────────────────────────────────────────────────────────
+
+/** Weighted engagement: comments signal deep intent; plays are raw impressions */
+function viralityScore(post: Post): number {
+  return post.likesCount + post.commentsCount * 3 + post.playsCount * 0.05;
+}
+
+function formatScore(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return Math.round(n).toLocaleString();
+}
+
+const RANK_STYLES = [
+  { ring: "ring-yellow-400/60", badge: "bg-yellow-400 text-black", label: "🥇 #1" },
+  { ring: "ring-zinc-300/40",   badge: "bg-zinc-300 text-black",   label: "🥈 #2" },
+  { ring: "ring-amber-600/50",  badge: "bg-amber-700 text-white",  label: "🥉 #3" },
+];
+
+// ─── Post card ────────────────────────────────────────────────────────────────
+
+function PostCard({ post, rank }: { post: Post; rank?: number }) {
+  const style = rank !== undefined ? RANK_STYLES[rank] : undefined;
   return (
     <a
       href={post.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group relative flex flex-col gap-2 rounded-xl overflow-hidden border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+      className={`group relative flex flex-col gap-2 rounded-xl overflow-hidden border bg-white/5 hover:bg-white/10 transition-colors ${style ? `border-white/20 ring-2 ${style.ring}` : "border-white/10"}`}
     >
+      {style && (
+        <span className={`absolute top-2 left-2 z-10 text-xs font-bold px-1.5 py-0.5 rounded-full ${style.badge}`}>
+          {style.label}
+        </span>
+      )}
+
       {post.thumbnailUrl ? (
         <div className="relative aspect-[9/16] w-full overflow-hidden bg-zinc-800">
           <Image
@@ -66,6 +96,7 @@ function PostCard({ post }: { post: Post }) {
           <Play className="h-8 w-8 text-zinc-600" />
         </div>
       )}
+
       <div className="p-3 flex flex-col gap-1">
         <p className="text-xs text-zinc-400 line-clamp-2">{post.caption ?? "No caption"}</p>
         <div className="flex gap-3 text-xs text-zinc-500 mt-1">
@@ -81,6 +112,14 @@ function PostCard({ post }: { post: Post }) {
             </span>
           )}
         </div>
+        {rank !== undefined && (
+          <div className="flex items-center gap-1 mt-1">
+            <Flame className="h-3 w-3 text-orange-400" />
+            <span className="text-xs text-orange-400 font-semibold">
+              {formatScore(viralityScore(post))} virality score
+            </span>
+          </div>
+        )}
         {post.audioTitle && (
           <p className="text-xs text-purple-400 truncate flex items-center gap-1 mt-1">
             <Music2 className="h-3 w-3 flex-shrink-0" /> {post.audioTitle}
@@ -204,15 +243,29 @@ function NichesTab() {
               )}
             </CardHeader>
 
-            {isExpanded && posts.length > 0 && (
-              <CardContent>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {posts.slice(0, 10).map((p) => (
-                    <PostCard key={p.id} post={p} />
-                  ))}
-                </div>
-              </CardContent>
-            )}
+            {isExpanded && posts.length > 0 && (() => {
+              const sorted = [...posts].sort((a, b) => viralityScore(b) - viralityScore(a));
+              const top3 = sorted.slice(0, 3);
+              return (
+                <CardContent>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Trophy className="h-4 w-4 text-yellow-400" />
+                    <span className="text-sm font-semibold text-white">Top Viral Posts</span>
+                    <span className="text-xs text-zinc-500">ranked by likes + comments×3 + plays</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    {top3.map((p, i) => (
+                      <PostCard key={p.id} post={p} rank={i} />
+                    ))}
+                  </div>
+                  {posts.length > 3 && (
+                    <p className="text-xs text-zinc-500 mt-3">
+                      +{posts.length - 3} more posts in this niche
+                    </p>
+                  )}
+                </CardContent>
+              );
+            })()}
           </Card>
         );
       })}
