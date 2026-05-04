@@ -11,6 +11,8 @@ import { automationsRouter } from "./automations";
 import { instagramRouter } from "./instagram";
 import { videosRouter } from "./videos";
 import { inspireRouter } from "./inspire";
+import { brandRouter } from "./brand";
+import { carouselRouter } from "./carousel";
 
 export const appRouter = createTRPCRouter({
   ideas: ideasRouter,
@@ -25,6 +27,8 @@ export const appRouter = createTRPCRouter({
   instagram: instagramRouter,
   videos: videosRouter,
   inspire: inspireRouter,
+  brand: brandRouter,
+  carousel: carouselRouter,
 });
 
 export type AppRouter = typeof appRouter;

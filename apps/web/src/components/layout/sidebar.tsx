@@ -13,6 +13,10 @@ import {
   Zap,
   Settings,
   Shield,
+  Palette,
+  LayoutGrid,
+  TrendingUp,
+  BarChart2,
 } from "lucide-react";
 
 const navItems = [
@@ -21,6 +25,10 @@ const navItems = [
   { href: "/dashboard/scripts", label: "Scripts", icon: FileText },
   { href: "/dashboard/calendar", label: "Calendar", icon: Calendar },
   { href: "/dashboard/videos", label: "Videos", icon: Video },
+  { href: "/dashboard/inspire", label: "Inspire", icon: TrendingUp },
+  { href: "/dashboard/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/dashboard/brand", label: "Brand Kit", icon: Palette },
+  { href: "/dashboard/carousel", label: "Carousel", icon: LayoutGrid },
   { href: "/dashboard/automations", label: "Automations", icon: Zap },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];

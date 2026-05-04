@@ -66,6 +66,8 @@ model CreatorProfile {
   videos          UploadedVideo[]
   inspireNiches   InspireNiche[]
   inspireAccounts InspireAccount[]
+  brandKit        BrandKit?
+  carouselRuns    CarouselRun[]
 }
 
 model Niche {
@@ -558,6 +560,48 @@ enum ReviewStatus {
   APPROVED
   REJECTED
   REVISION_REQUESTED
+}
+
+// ─── Brand Kit ───────────────────────────────────────────────────────────────
+
+model BrandKit {
+  id             String         @id @default(cuid())
+  creatorId      String         @unique
+  brandName      String?
+  handle         String?        // e.g. "@mybrand"
+  niche          String?        // one-liner fed into GPT prompt
+  primaryColor   String?        @default("#06b6d4") // hex
+  accentColor    String?        @default("#8b5cf6") // hex
+  logoUrl        String?
+  website        String?
+  voiceNotes     String?        // tone/style instructions for GPT
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  creator        CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+// ─── Carousel Runs ────────────────────────────────────────────────────────────
+
+enum CarouselStatus {
+  PENDING
+  DONE
+  FAILED
+}
+
+model CarouselRun {
+  id          String         @id @default(cuid())
+  creatorId   String
+  title       String
+  platform    String         @default("instagram")
+  status      CarouselStatus @default(PENDING)
+  slideUrls   String[]       @default([])
+  caption     String?
+  pdfUrl      String?
+  webhookPayload Json?        // full payload sent to Make (for debugging / retry)
+  createdAt   DateTime       @default(now())
+  creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, createdAt])
 }
 
 // ─── Inspire / Trend Spy ──────────────────────────────────────────────────────
