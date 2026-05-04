@@ -430,23 +430,26 @@ function AudioTab() {
             <div className="min-w-0">
               <p className="text-sm font-medium text-white truncate">{track.title}</p>
               {track.artist && (
-                <p className="text-xs text-zinc-400 truncate">{track.artist}</p>
+                <p className="text-xs text-zinc-400 truncate">@{track.artist}</p>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-3 ml-4">
+          <div className="flex items-center gap-3 ml-4 flex-shrink-0">
             <Badge variant="outline" className="border-purple-400/40 text-purple-300 text-xs">
               {track.count}× used
             </Badge>
-            {track.url && (
+            {track.url ? (
               <a
                 href={track.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-zinc-500 hover:text-white"
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/40 hover:text-white transition-colors border border-purple-500/30"
               >
-                <ExternalLink className="h-4 w-4" />
+                <Play className="h-3 w-3" />
+                Preview
               </a>
+            ) : (
+              <span className="text-xs text-zinc-600 px-3 py-1.5">No preview</span>
             )}
           </div>
         </div>
