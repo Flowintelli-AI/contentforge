@@ -80,7 +80,8 @@ async function runActor(input: Record<string, unknown>, limit = 20): Promise<Scr
   }
 
   // Use synchronous run endpoint — waits for completion, returns dataset items directly
-  const url = `${APIFY_BASE}/acts/${ACTOR_ID}/run-sync-get-dataset-items?token=${apiKey}&timeout=120&memory=512`;
+  // timeout=50 leaves headroom for DB writes within Vercel's 60s serverless limit
+  const url = `${APIFY_BASE}/acts/${ACTOR_ID}/run-sync-get-dataset-items?token=${apiKey}&timeout=50&memory=512`;
 
   const res = await fetch(url, {
     method: "POST",

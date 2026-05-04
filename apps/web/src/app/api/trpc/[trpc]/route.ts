@@ -3,6 +3,9 @@ import { type NextRequest } from "next/server";
 import { createTRPCContext } from "@/server/trpc";
 import { appRouter } from "@/server/routers";
 
+// Allow long-running procedures (e.g. Apify scraping) — Hobby max is 60s
+export const maxDuration = 60;
+
 const handler = (req: NextRequest) =>
   fetchRequestHandler({
     endpoint: "/api/trpc",
