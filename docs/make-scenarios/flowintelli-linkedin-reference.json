@@ -1,0 +1,119 @@
+{
+  "name": "RSS → LinkedIn Carousel (Flowintelli) — REFERENCE v1",
+  "_note": "Original LinkedIn scenario. Instagram scenario is a derivative — export current from Make.com UI and save as flowintelli-instagram-v1.json",
+  "flow": [
+    {
+      "id": 1,
+      "module": "rss:TriggerWatchFeed",
+      "parameters": {
+        "feedUrl": "https://rss.app/feeds/trHsQsMnaGRcSXAg.xml",
+        "maxResults": 1
+      },
+      "metadata": {
+        "designer": { "x": 0, "y": 0 }
+      }
+    },
+    {
+      "id": 2,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": false,
+        "useNewZLibDeCompress": true
+      },
+      "mapper": {
+        "url": "https://flowintelli-carousel.azurewebsites.net/api/generatecarousel",
+        "method": "post",
+        "headers": [
+          { "name": "x-api-key", "value": "REPLACE_WITH_API_KEY" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "qs": [],
+        "body": "{\"article_title\": \"{{1.title}}\", \"article_body\": \"{{stripHtml(1.description)}}\", \"platform\": \"linkedin\"}",
+        "timeout": "120",
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "parseResponse": true
+      },
+      "metadata": {
+        "designer": { "x": 300, "y": 0 }
+      }
+    },
+    {
+      "id": 3,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": false,
+        "useNewZLibDeCompress": true
+      },
+      "mapper": {
+        "url": "https://api.linkedin.com/v2/assets?action=registerUpload",
+        "method": "post",
+        "headers": [
+          { "name": "Authorization", "value": "Bearer REPLACE_WITH_LINKEDIN_BEARER_TOKEN" },
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "X-Restli-Protocol-Version", "value": "2.0.0" }
+        ],
+        "qs": [],
+        "body": "{\"registerUploadRequest\": {\"recipes\": [\"urn:li:digitalmediaRecipe:feedshare-document\"], \"owner\": \"urn:li:organization:107541618\", \"serviceRelationships\": [{\"relationshipType\": \"OWNER\", \"identifier\": \"urn:li:userGeneratedContent\"}]}}",
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "parseResponse": true
+      },
+      "metadata": {
+        "designer": { "x": 600, "y": 0 }
+      }
+    },
+    {
+      "id": 4,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": false,
+        "useNewZLibDeCompress": true
+      },
+      "mapper": {
+        "url": "{{get(3.body.value.uploadMechanism; \"com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest\").uploadUrl}}",
+        "method": "put",
+        "headers": [
+          { "name": "Authorization", "value": "Bearer REPLACE_WITH_LINKEDIN_BEARER_TOKEN" },
+          { "name": "Content-Type", "value": "application/octet-stream" }
+        ],
+        "qs": [],
+        "body": "{{toBinary(2.body.pdf_base64; \"base64\")}}",
+        "bodyType": "raw",
+        "contentType": "application/octet-stream"
+      },
+      "metadata": {
+        "designer": { "x": 900, "y": 0 }
+      }
+    },
+    {
+      "id": 5,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": false,
+        "useNewZLibDeCompress": true
+      },
+      "mapper": {
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "method": "post",
+        "headers": [
+          { "name": "Authorization", "value": "Bearer REPLACE_WITH_LINKEDIN_BEARER_TOKEN" },
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "X-Restli-Protocol-Version", "value": "2.0.0" }
+        ],
+        "qs": [],
+        "body": "{\"author\": \"urn:li:organization:107541618\", \"lifecycleState\": \"PUBLISHED\", \"specificContent\": {\"com.linkedin.ugc.ShareContent\": {\"shareCommentary\": {\"text\": \"{{2.body.caption}}\"}, \"shareMediaCategory\": \"DOCUMENT\", \"media\": [{\"status\": \"READY\", \"description\": {\"text\": \"{{1.title}}\"}, \"media\": \"{{3.body.value.asset}}\", \"title\": {\"text\": \"{{1.title}}\"}}]}}, \"visibility\": {\"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"}}",
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "parseResponse": true
+      },
+      "metadata": {
+        "designer": { "x": 1200, "y": 0 }
+      }
+    }
+  ]
+}
