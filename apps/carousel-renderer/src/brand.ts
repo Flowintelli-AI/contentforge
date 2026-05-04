@@ -52,6 +52,56 @@ export const SAFE_HEIGHT = BRAND.canvas.height - BRAND.safe.top - BRAND.safe.bot
  */
 export type Platform = 'instagram' | 'linkedin';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BRAND CONFIG — supplied by caller (all fields optional)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** User-supplied brand configuration — all fields optional; Flowintelli values are the defaults. */
+export interface BrandConfig {
+  /** Brand/company name shown in slide footer and injected into prompts. */
+  name?: string;
+  /** Social handle shown on slide 1 (e.g. "@mybrand"). */
+  handle?: string;
+  /** One-line description of the brand/niche — injected into GPT system prompt. */
+  niche?: string;
+  /** Primary accent colour (hex, e.g. "#06b6d4"). Used for highlights, gradient start. */
+  primary_color?: string;
+  /** Secondary accent colour (hex, e.g. "#3b82f6"). Used for gradient mid. */
+  accent_color?: string;
+  /** Logo image URL — reserved for Phase 2 rendering; accepted but not yet applied to slides. */
+  logo_url?: string;
+  /** Free-form voice/tone notes appended to the GPT system prompt. */
+  voice_notes?: string;
+  /** Website shown in CTA footer (e.g. "mybrand.com"). */
+  website?: string;
+}
+
+/** Fully resolved theme — all fields present; safe to use in templates without null checks. */
+export interface BrandTheme {
+  name: string;
+  handle: string;
+  niche: string;
+  accent: string;
+  gradientStart: string;
+  gradientMid: string;
+  gradientEnd: string;
+  website: string;
+}
+
+/** Merge user-supplied BrandConfig with Flowintelli defaults → always a complete BrandTheme. */
+export function resolveBrandTheme(brand?: BrandConfig): BrandTheme {
+  return {
+    name:          brand?.name          ?? 'Flowintelli',
+    handle:        brand?.handle        ?? '@flowintelli',
+    niche:         brand?.niche         ?? 'AI-powered business automation helping teams eliminate manual work',
+    accent:        brand?.primary_color ?? BRAND.colors.accent,
+    gradientStart: brand?.primary_color ?? BRAND.colors.gradientStart,
+    gradientMid:   brand?.accent_color  ?? BRAND.colors.gradientMid,
+    gradientEnd:   BRAND.colors.gradientEnd,
+    website:       brand?.website       ?? 'flowintelli.com',
+  };
+}
+
 export interface PlatformFitness {
   instagram: number; // 0–100
   linkedin: number;  // 0–100
@@ -84,4 +134,6 @@ export interface CarouselInput {
   caption: string;
   platform_fitness: PlatformFitness; // advisory — scored by GPT, computed recommendation in code
   slides: SlideData[];               // always exactly 10
+  /** Optional brand config — when omitted, Flowintelli defaults apply (backward compatible). */
+  brand?: BrandConfig;
 }

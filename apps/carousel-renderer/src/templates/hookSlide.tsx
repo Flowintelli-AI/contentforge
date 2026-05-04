@@ -1,4 +1,4 @@
-import { BRAND, SlideData } from '../brand';
+import { BRAND, BrandTheme, SlideData } from '../brand';
 import { SlideCounter, ProgressBar, HighlightedHeadline, FOOTER_BOTTOM } from './shared';
 import { LOGO_BASE64, MASCOT_POINTING } from '../assets';
 
@@ -13,11 +13,20 @@ export function HookSlide({
   slide,
   totalSlides,
   imageDataUri,
+  brand,
 }: {
   slide: SlideData;
   totalSlides: number;
   imageDataUri?: string;
+  brand?: BrandTheme;
 }) {
+  const th = {
+    accent:        brand?.accent        ?? BRAND.colors.accent,
+    gradientStart: brand?.gradientStart ?? BRAND.colors.gradientStart,
+    gradientMid:   brand?.gradientMid   ?? BRAND.colors.gradientMid,
+    gradientEnd:   brand?.gradientEnd   ?? BRAND.colors.gradientEnd,
+  };
+  const isDefaultBrand = !brand || brand.name === 'Flowintelli';
   const hasImage = !!imageDataUri;
   const hasHookStat = !!slide.hook_stat;
   const headlineFontSize = hasHookStat ? 88 : 116;
@@ -120,10 +129,10 @@ export function HookSlide({
             fontFamily: BRAND.fonts.body,
             fontSize: 24,
             fontWeight: 600,
-            color: BRAND.colors.accent,
+            color: th.accent,
           }}
         >
-          @flowintelli
+          {brand?.handle ?? '@flowintelli'}
         </span>
       </div>
 
@@ -135,7 +144,7 @@ export function HookSlide({
           left: 0,
           width: W,
           height: 6,
-          background: `linear-gradient(90deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid}, ${BRAND.colors.gradientEnd})`,
+          background: `linear-gradient(90deg, ${th.gradientStart}, ${th.gradientMid}, ${th.gradientEnd})`,
         }}
       />
 
@@ -164,7 +173,7 @@ export function HookSlide({
                 fontFamily: BRAND.fonts.headline,
                 fontSize: 180,
                 fontWeight: 800,
-                color: BRAND.colors.accent,
+                color: th.accent,
                 lineHeight: 1.0,
               }}
             >
@@ -188,6 +197,7 @@ export function HookSlide({
             fontWeight={800}
             maxWidth={CONTENT_W}
             highlightWords={slide.highlight_word ? [slide.highlight_word] : undefined}
+            brand={brand}
           />
         </div>
 
@@ -242,7 +252,7 @@ export function HookSlide({
               style={{
                 width: 32,
                 height: 3,
-                backgroundColor: BRAND.colors.accent,
+                backgroundColor: th.accent,
                 borderRadius: 2,
               }}
             />
@@ -262,8 +272,8 @@ export function HookSlide({
         <img src={MASCOT_POINTING} width={170} height={255} alt="" />
       </div>
 
-      <SlideCounter position={slide.position} total={totalSlides} />
-      <ProgressBar position={slide.position} total={totalSlides} />
+      <SlideCounter position={slide.position} total={totalSlides} brand={brand} />
+      <ProgressBar position={slide.position} total={totalSlides} brand={brand} />
     </div>
   );
 }

@@ -1,9 +1,10 @@
-import type { CarouselInput, Platform } from './brand';
+import type { CarouselInput, BrandConfig, Platform } from './brand';
 import { getSystemPrompt, buildUserPrompt } from './prompt';
 
 /**
  * Calls GPT-4o-mini to convert a raw article into structured CarouselInput.
  * Platform-aware: uses appropriate voice/tone/caption prompt per platform.
+ * Brand-aware: injects caller's brand into prompts (Flowintelli is the default).
  * Uses JSON mode to guarantee valid JSON output every time.
  */
 export async function articleToCarousel(
@@ -11,6 +12,7 @@ export async function articleToCarousel(
   body: string,
   apiKey: string,
   platform: Platform,
+  brand?: BrandConfig,
 ): Promise<CarouselInput> {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -24,8 +26,8 @@ export async function articleToCarousel(
       temperature: 0.7,
       max_tokens: 2000,
       messages: [
-        { role: 'system', content: getSystemPrompt(platform) },
-        { role: 'user', content: buildUserPrompt(title, body, platform) },
+        { role: 'system', content: getSystemPrompt(platform, brand) },
+        { role: 'user', content: buildUserPrompt(title, body, platform, brand) },
       ],
     }),
   });

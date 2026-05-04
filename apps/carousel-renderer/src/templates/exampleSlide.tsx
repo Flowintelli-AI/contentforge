@@ -1,4 +1,4 @@
-import { BRAND, SlideData } from '../brand';
+import { BRAND, BrandTheme, SlideData } from '../brand';
 import { SlideCounter, ProgressBar, HighlightedHeadline, FOOTER_BOTTOM } from './shared';
 
 const W = BRAND.canvas.width;
@@ -24,11 +24,19 @@ export function ExampleSlide({
   slide,
   totalSlides,
   imageDataUri,
+  brand,
 }: {
   slide: SlideData;
   totalSlides: number;
   imageDataUri?: string;
+  brand?: BrandTheme;
 }) {
+  const th = {
+    accent:        brand?.accent        ?? BRAND.colors.accent,
+    gradientStart: brand?.gradientStart ?? BRAND.colors.gradientStart,
+    gradientMid:   brand?.gradientMid   ?? BRAND.colors.gradientMid,
+    gradientEnd:   brand?.gradientEnd   ?? BRAND.colors.gradientEnd,
+  };
   const hasImage = !!imageDataUri;
   const bullets = slide.bullets ?? [];
   const hasBottomContent = !!slide.body || bullets.length > 0;
@@ -73,7 +81,7 @@ export function ExampleSlide({
           left: 0,
           width: W,
           height: 5,
-          background: `linear-gradient(90deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid}, ${BRAND.colors.gradientEnd})`,
+          background: `linear-gradient(90deg, ${th.gradientStart}, ${th.gradientMid}, ${th.gradientEnd})`,
         }}
       />
 
@@ -86,7 +94,7 @@ export function ExampleSlide({
             left: 0,
             width: 4,
             height: H - BRAND.safe.top - BRAND.safe.bottom,
-            background: `linear-gradient(180deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientEnd})`,
+            background: `linear-gradient(180deg, ${th.gradientStart}, ${th.gradientEnd})`,
           }}
         />
       )}
@@ -116,6 +124,7 @@ export function ExampleSlide({
             fontWeight={800}
             maxWidth={CONTENT_W}
             highlightWords={slide.highlight_word ? [slide.highlight_word] : undefined}
+            brand={brand}
           />
         </div>
 
@@ -162,7 +171,7 @@ export function ExampleSlide({
                     width: 10,
                     height: 10,
                     borderRadius: '50%',
-                    backgroundColor: BRAND.colors.accent,
+                    backgroundColor: th.accent,
                     flexShrink: 0,
                     marginTop: 20,
                   }}
@@ -184,8 +193,8 @@ export function ExampleSlide({
         )}
       </div>
 
-      <SlideCounter position={slide.position} total={totalSlides} />
-      <ProgressBar position={slide.position} total={totalSlides} />
+      <SlideCounter position={slide.position} total={totalSlides} brand={brand} />
+      <ProgressBar position={slide.position} total={totalSlides} brand={brand} />
     </div>
   );
 }

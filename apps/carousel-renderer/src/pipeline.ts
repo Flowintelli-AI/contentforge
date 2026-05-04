@@ -4,7 +4,7 @@ import { PDFDocument } from 'pdf-lib';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { v2 as cloudinary } from 'cloudinary';
 import { getFonts } from './fonts';
-import { CarouselInput } from './brand';
+import { CarouselInput, resolveBrandTheme } from './brand';
 import { renderSlide } from './templates/index';
 import { fetchPexelsImage } from './images';
 
@@ -28,6 +28,7 @@ export interface CarouselRenderResult {
 export async function generateCarouselPdf(input: CarouselInput): Promise<CarouselRenderResult> {
   const fonts = await getFonts();
   const pexelsKey = process.env.PEXELS_API_KEY ?? '';
+  const brand = resolveBrandTheme(input.brand);
 
   // Pre-fetch background images in parallel for hook + example slides
   const imageMap = new Map<number, string>();
@@ -47,7 +48,7 @@ export async function generateCarouselPdf(input: CarouselInput): Promise<Carouse
 
   for (const slide of input.slides) {
     const imageDataUri = imageMap.get(slide.position);
-    const element = renderSlide(slide, input.slides.length, imageDataUri);
+    const element = renderSlide(slide, input.slides.length, imageDataUri, brand);
 
     const svg = await satori(element, {
       width: SLIDE_WIDTH,

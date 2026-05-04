@@ -11,7 +11,7 @@
 //   8. "SAVE THIS POST" explicit trigger on CTA — direct instruction drives saves
 //   9. Flowintelli adaptation: dark navy + cyan replaces yellow + black — same contrast principle
 
-import { BRAND } from '../brand';
+import { BRAND, BrandTheme } from '../brand';
 import { LOGO_BASE64 } from '../assets';
 
 const W = BRAND.canvas.width;
@@ -20,9 +20,20 @@ const PAD_L = BRAND.safe.left + 60;
 export const FOOTER_BOTTOM = 220;
 
 /** Shared footer: slide counter (left) + logo + brand name (right) */
-export function SlideFooter({ position, total }: { position: number; total: number }) {
+export function SlideFooter({
+  position,
+  total,
+  brand,
+}: {
+  position: number;
+  total: number;
+  brand?: BrandTheme;
+}) {
   const num = String(position).padStart(2, '0');
   const tot = String(total).padStart(2, '0');
+  const accent = brand?.accent ?? BRAND.colors.accent;
+  const name = brand?.name ?? 'Flowintelli';
+  const isDefault = !brand || brand.name === 'Flowintelli';
   return (
     <div
       style={{
@@ -48,16 +59,16 @@ export function SlideFooter({ position, total }: { position: number; total: numb
         {`${num} / ${tot}`}
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <img src={LOGO_BASE64} width={36} height={36} alt="" />
+        {isDefault ? <img src={LOGO_BASE64} width={36} height={36} alt="" /> : null}
         <span
           style={{
             fontFamily: BRAND.fonts.body,
             fontSize: 22,
             fontWeight: 700,
-            color: BRAND.colors.accent,
+            color: accent,
           }}
         >
-          Flowintelli
+          {name}
         </span>
       </div>
     </div>
@@ -65,8 +76,19 @@ export function SlideFooter({ position, total }: { position: number; total: numb
 }
 
 /** Gradient progress bar at the absolute bottom of the slide */
-export function ProgressBar({ position, total }: { position: number; total: number }) {
+export function ProgressBar({
+  position,
+  total,
+  brand,
+}: {
+  position: number;
+  total: number;
+  brand?: BrandTheme;
+}) {
   const filledWidth = Math.round((position / total) * W);
+  const gradStart = brand?.gradientStart ?? BRAND.colors.gradientStart;
+  const gradMid   = brand?.gradientMid   ?? BRAND.colors.gradientMid;
+  const gradEnd   = brand?.gradientEnd   ?? BRAND.colors.gradientEnd;
   return (
     <div
       style={{
@@ -83,7 +105,7 @@ export function ProgressBar({ position, total }: { position: number; total: numb
         style={{
           width: filledWidth,
           height: 6,
-          background: `linear-gradient(90deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid}, ${BRAND.colors.gradientEnd})`,
+          background: `linear-gradient(90deg, ${gradStart}, ${gradMid}, ${gradEnd})`,
         }}
       />
     </div>
@@ -91,9 +113,18 @@ export function ProgressBar({ position, total }: { position: number; total: numb
 }
 
 /** Slide counter + swipe nudge — for middle slides 2–9 */
-export function SlideCounter({ position, total }: { position: number; total: number }) {
+export function SlideCounter({
+  position,
+  total,
+  brand,
+}: {
+  position: number;
+  total: number;
+  brand?: BrandTheme;
+}) {
   const num = String(position).padStart(2, '0');
   const tot = String(total).padStart(2, '0');
+  const accent = brand?.accent ?? BRAND.colors.accent;
   return (
     <div
       style={{
@@ -121,7 +152,7 @@ export function SlideCounter({ position, total }: { position: number; total: num
           fontFamily: BRAND.fonts.body,
           fontSize: 22,
           fontWeight: 600,
-          color: BRAND.colors.accent,
+          color: accent,
         }}
       >
         {'swipe >>'}
@@ -140,13 +171,16 @@ export function HighlightedHeadline({
   fontWeight,
   maxWidth,
   highlightWords,
+  brand,
 }: {
   text: string;
   fontSize: number;
   fontWeight: number;
   maxWidth: number;
   highlightWords?: string[];
+  brand?: BrandTheme;
 }) {
+  const accent = brand?.accent ?? BRAND.colors.accent;
   const clean = text.replace(/[^\x00-\x7F]/g, '').replace(/\s+/g, ' ').trim();
   const words = clean.split(' ');
   const wordSpacing = Math.round(fontSize * 0.28);
@@ -168,7 +202,7 @@ export function HighlightedHeadline({
               fontFamily: BRAND.fonts.headline,
               fontSize,
               fontWeight,
-              color: isHighlighted ? BRAND.colors.accent : BRAND.colors.text,
+              color: isHighlighted ? accent : BRAND.colors.text,
               lineHeight: 1.12,
               marginRight: i < words.length - 1 ? wordSpacing : 0,
             }}
@@ -180,3 +214,5 @@ export function HighlightedHeadline({
     </div>
   );
 }
+
+

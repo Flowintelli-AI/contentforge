@@ -107,7 +107,13 @@ async function generateCarousel(
     }
     try {
       context.log(`articleToCarousel: calling GPT-4o-mini [${platform}] for`, body.article_title);
-      input = await articleToCarousel(body.article_title, body.article_body, openAiKey, platform);
+      input = await articleToCarousel(
+        body.article_title,
+        body.article_body,
+        openAiKey,
+        platform,
+        typeof body.brand === 'object' && body.brand !== null ? body.brand as import('../brand').BrandConfig : undefined,
+      );
     } catch (err) {
       context.error('articleToCarousel error:', err);
       return {

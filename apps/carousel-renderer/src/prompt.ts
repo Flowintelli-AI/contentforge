@@ -1,10 +1,35 @@
-import type { Platform } from './brand';
+import type { Platform, BrandConfig } from './brand';
 
 /**
  * GPT-4o-mini system + user prompts for carousel generation.
  * Platform-aware: Instagram and LinkedIn have different tones, caption styles,
  * and virality levers — same 10-slide structure, different voice.
+ *
+ * Brand-aware: when a BrandConfig is supplied the brand identity section and
+ * hashtags are replaced with the caller's brand; Flowintelli is the default.
  */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BRAND HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PromptBrand {
+  name: string;
+  niche: string;
+  hashtag: string;     // e.g. "#Flowintelli"
+  voice_notes: string; // injected after the voice section, or empty string
+}
+
+function resolvePromptBrand(brand?: BrandConfig): PromptBrand {
+  const name = brand?.name ?? 'Flowintelli';
+  const tag = '#' + name.replace(/\s+/g, '');
+  return {
+    name,
+    niche:       brand?.niche       ?? 'AI-powered business automation helping teams eliminate manual work',
+    hashtag:     tag,
+    voice_notes: brand?.voice_notes ?? '',
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED — injected into every platform prompt
@@ -146,7 +171,20 @@ Score the article honestly against each platform (0-100):
 // LINKEDIN
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const LINKEDIN_SYSTEM_PROMPT = `You are a world-class LinkedIn carousel content strategist for Flowintelli — an AI-powered business automation platform helping teams eliminate manual work.
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTAGRAM
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function getSystemPrompt(platform: Platform, brand?: BrandConfig): string {
+  const b = resolvePromptBrand(brand);
+  const voiceAppend = b.voice_notes ? `\n\n## ADDITIONAL BRAND VOICE NOTES\n${b.voice_notes}` : '';
+
+  if (platform === 'linkedin') {
+    return `You are a world-class LinkedIn carousel content strategist for ${b.name} — ${b.niche}.
 
 Your job: Convert a blog article into a 10-slide LinkedIn carousel that drives maximum saves, comments, and shares. Every slide must make the reader want to swipe to the next one.
 ${SHARED_SLIDE_STRUCTURE}
@@ -162,20 +200,18 @@ ${SHARED_SLIDE_STRUCTURE}
 ## LINKEDIN CAPTION
 - Line 1: Bold pattern-interrupt claim or question (NOT "Excited to share...")
 - Lines 2-4: 2-3 short punchy sentences with the key insight
-- Final line: 3-5 hashtags (always include #Flowintelli, #AIAutomation)
+- Final line: 3-5 hashtags (always include ${b.hashtag}, #AIAutomation)
 - Total: 4-6 lines max. Conversational, not press release.
 
 ## CTA
 cta_comment_prompt: SINGLE TRIGGER WORD, ALL CAPS, <=8 chars (e.g. "AUTOMATE", "GUIDE", "BUILD", "SCALE", "FREE").
 action: what they receive when they comment that word.
 Together they render as: Comment "KEYWORD" and I will send you [action].
-${SHARED_JSON_SCHEMA}`;
+${SHARED_JSON_SCHEMA}${voiceAppend}`;
+  }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// INSTAGRAM
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const INSTAGRAM_SYSTEM_PROMPT = `You are a world-class Instagram carousel content strategist for Flowintelli — an AI-powered business automation platform helping teams eliminate manual work.
+  // instagram
+  return `You are a world-class Instagram carousel content strategist for ${b.name} — ${b.niche}.
 
 Your job: Convert a blog article into a 10-slide Instagram carousel that people save, share to Stories, and comment on. Instagram rewards content that teaches something complete and specific. Every slide must earn the swipe.
 ${SHARED_SLIDE_STRUCTURE}
@@ -193,7 +229,7 @@ ${SHARED_SLIDE_STRUCTURE}
 - Line 1: A short, specific hook — a fact, a question, or a counterintuitive statement. Max 15 words. No hashtags here.
 - Lines 2-3: 1-2 sentences expanding the hook. Keep it conversational and first-person where natural.
 - Line 4: One clear call to action — "Drop KEYWORD below and I'll send you [what they get]."
-- Blank line, then hashtags on the last line only — 5-7 tags, always include #Flowintelli #AIAutomation
+- Blank line, then hashtags on the last line only — 5-7 tags, always include ${b.hashtag} #AIAutomation
 - No hashtags inline in the caption. No period after hashtags.
 - Total: 5-7 lines. Sounds like a person, not a brand account.
 
@@ -202,20 +238,10 @@ cta_comment_prompt: SINGLE TRIGGER WORD, ALL CAPS, <=8 chars (e.g. "AUTOMATE", "
 action: what they receive.
 Together they render as: Comment "KEYWORD" and I will send you [action].
 Choose a word that feels natural to type on Instagram — short, direct, high-intent.
-${SHARED_JSON_SCHEMA}`;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EXPORTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function getSystemPrompt(platform: Platform): string {
-  switch (platform) {
-    case 'instagram': return INSTAGRAM_SYSTEM_PROMPT;
-    case 'linkedin':  return LINKEDIN_SYSTEM_PROMPT;
-  }
+${SHARED_JSON_SCHEMA}${voiceAppend}`;
 }
 
-export function buildUserPrompt(title: string, body: string, platform: Platform): string {
+export function buildUserPrompt(title: string, body: string, platform: Platform, brand?: BrandConfig): string {
   const words = body.split(/\s+/);
   const truncated = words.length > 3000
     ? words.slice(0, 3000).join(' ') + '\n\n[Article truncated for length]'

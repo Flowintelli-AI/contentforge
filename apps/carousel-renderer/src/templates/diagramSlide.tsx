@@ -1,4 +1,4 @@
-import { BRAND, SlideData } from '../brand';
+import { BRAND, BrandTheme, SlideData } from '../brand';
 import { SlideCounter, ProgressBar, HighlightedHeadline, FOOTER_BOTTOM } from './shared';
 
 const W = BRAND.canvas.width;
@@ -20,7 +20,7 @@ function statFontSize(value: string): number {
 }
 
 /** Single stat card — left-bordered column with value + label. */
-function StatCard({ value, label }: { value: string; label: string }) {
+function StatCard({ value, label, accent }: { value: string; label: string; accent: string }) {
   const cleanValue = value.replace(/[^\x00-\x7F]/g, '');
   return (
     <div
@@ -31,7 +31,7 @@ function StatCard({ value, label }: { value: string; label: string }) {
         width: STAT_W,
         borderLeftWidth: 3,
         borderLeftStyle: 'solid',
-        borderLeftColor: BRAND.colors.accent,
+        borderLeftColor: accent,
         paddingLeft: 24,
         paddingTop: 8,
         paddingBottom: 8,
@@ -42,7 +42,7 @@ function StatCard({ value, label }: { value: string; label: string }) {
           fontFamily: BRAND.fonts.headline,
           fontSize: statFontSize(value),
           fontWeight: 800,
-          color: BRAND.colors.accent,
+          color: accent,
           lineHeight: 1.0,
         }}
       >
@@ -73,10 +73,18 @@ function StatCard({ value, label }: { value: string; label: string }) {
 export function DiagramSlide({
   slide,
   totalSlides,
+  brand,
 }: {
   slide: SlideData;
   totalSlides: number;
+  brand?: BrandTheme;
 }) {
+  const th = {
+    accent:        brand?.accent        ?? BRAND.colors.accent,
+    gradientStart: brand?.gradientStart ?? BRAND.colors.gradientStart,
+    gradientMid:   brand?.gradientMid   ?? BRAND.colors.gradientMid,
+    gradientEnd:   brand?.gradientEnd   ?? BRAND.colors.gradientEnd,
+  };
   const steps = slide.steps ?? [];
   const stats = slide.stats ?? [];
   const hasSteps = steps.length > 0;
@@ -102,7 +110,7 @@ export function DiagramSlide({
           left: 0,
           width: W,
           height: 5,
-          background: `linear-gradient(90deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid}, ${BRAND.colors.gradientEnd})`,
+          background: `linear-gradient(90deg, ${th.gradientStart}, ${th.gradientMid}, ${th.gradientEnd})`,
         }}
       />
 
@@ -146,6 +154,7 @@ export function DiagramSlide({
             fontWeight={800}
             maxWidth={CONTENT_W}
             highlightWords={slide.highlight_word ? [slide.highlight_word] : undefined}
+            brand={brand}
           />
         </div>
 
@@ -162,7 +171,7 @@ export function DiagramSlide({
                     fontFamily: BRAND.fonts.headline,
                     fontSize: 36,
                     fontWeight: 800,
-                    color: BRAND.colors.accent,
+                    color: th.accent,
                     lineHeight: 1.1,
                     flexShrink: 0,
                     minWidth: 40,
@@ -201,7 +210,7 @@ export function DiagramSlide({
                 fontFamily: BRAND.fonts.headline,
                 fontSize: 220,
                 fontWeight: 800,
-                color: BRAND.colors.accent,
+                color: th.accent,
                 lineHeight: 1.0,
               }}
             >
@@ -226,17 +235,17 @@ export function DiagramSlide({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             {/* Row 1: stats[0] + stats[1] */}
             <div style={{ display: 'flex', gap: 24 }}>
-              <StatCard value={stats[0].value} label={stats[0].label} />
+              <StatCard value={stats[0].value} label={stats[0].label} accent={th.accent} />
               {stats.length > 1 && (
-                <StatCard value={stats[1].value} label={stats[1].label} />
+                <StatCard value={stats[1].value} label={stats[1].label} accent={th.accent} />
               )}
             </div>
             {/* Row 2: stats[2] + stats[3] (if present) */}
             {stats.length > 2 && (
               <div style={{ display: 'flex', gap: 24 }}>
-                <StatCard value={stats[2].value} label={stats[2].label} />
+                <StatCard value={stats[2].value} label={stats[2].label} accent={th.accent} />
                 {stats.length > 3 && (
-                  <StatCard value={stats[3].value} label={stats[3].label} />
+                  <StatCard value={stats[3].value} label={stats[3].label} accent={th.accent} />
                 )}
               </div>
             )}
@@ -295,8 +304,8 @@ export function DiagramSlide({
         )}
       </div>
 
-      <SlideCounter position={slide.position} total={totalSlides} />
-      <ProgressBar position={slide.position} total={totalSlides} />
+      <SlideCounter position={slide.position} total={totalSlides} brand={brand} />
+      <ProgressBar position={slide.position} total={totalSlides} brand={brand} />
     </div>
   );
 }

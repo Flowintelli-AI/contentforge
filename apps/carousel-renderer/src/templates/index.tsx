@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { SlideData } from '../brand';
+import { SlideData, BrandTheme } from '../brand';
 import { HookSlide } from './hookSlide';
 import { ExampleSlide } from './exampleSlide';
 import { DiagramSlide } from './diagramSlide';
@@ -11,19 +11,21 @@ export function renderSlide(
   slide: SlideData,
   totalSlides: number,
   imageDataUri?: string,
+  brand?: BrandTheme,
 ): ReactElement {
   switch (slide.type) {
     case 'hook':
-      return <HookSlide slide={slide} totalSlides={totalSlides} imageDataUri={imageDataUri} />;
+      return <HookSlide slide={slide} totalSlides={totalSlides} imageDataUri={imageDataUri} brand={brand} />;
     case 'example':
-      return <ExampleSlide slide={slide} totalSlides={totalSlides} imageDataUri={imageDataUri} />;
+      return <ExampleSlide slide={slide} totalSlides={totalSlides} imageDataUri={imageDataUri} brand={brand} />;
     case 'diagram':
-      return <DiagramSlide slide={slide} totalSlides={totalSlides} />;
+      return <DiagramSlide slide={slide} totalSlides={totalSlides} brand={brand} />;
     case 'practical':
-      return <PracticalSlide slide={slide} totalSlides={totalSlides} />;
+      return <PracticalSlide slide={slide} totalSlides={totalSlides} brand={brand} />;
     case 'cta':
-      return <CtaSlide slide={slide} totalSlides={totalSlides} />;
+      return <CtaSlide slide={slide} totalSlides={totalSlides} brand={brand} />;
     default:
-      return <HookSlide slide={slide} totalSlides={totalSlides} imageDataUri={imageDataUri} />;
+      return <HookSlide slide={slide} totalSlides={totalSlides} imageDataUri={imageDataUri} brand={brand} />;
   }
 }
+

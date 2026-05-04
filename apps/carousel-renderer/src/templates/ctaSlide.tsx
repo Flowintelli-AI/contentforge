@@ -1,4 +1,4 @@
-import { BRAND, SlideData } from '../brand';
+import { BRAND, BrandTheme, SlideData } from '../brand';
 import { ProgressBar, HighlightedHeadline, FOOTER_BOTTOM } from './shared';
 import { LOGO_BASE64, MASCOT_CELEBRATING } from '../assets';
 
@@ -28,10 +28,19 @@ function keywordFontSize(word: string): number {
 export function CtaSlide({
   slide,
   totalSlides,
+  brand,
 }: {
   slide: SlideData;
   totalSlides: number;
+  brand?: BrandTheme;
 }) {
+  const th = {
+    accent:        brand?.accent        ?? BRAND.colors.accent,
+    gradientStart: brand?.gradientStart ?? BRAND.colors.gradientStart,
+    gradientMid:   brand?.gradientMid   ?? BRAND.colors.gradientMid,
+    gradientEnd:   brand?.gradientEnd   ?? BRAND.colors.gradientEnd,
+  };
+  const isDefaultBrand = !brand || brand.name === 'Flowintelli';
   const keyword = slide.cta_comment_prompt ?? 'AUTOMATE';
   const benefit = slide.action ?? 'the full automation playbook';
   const kwSize = keywordFontSize(keyword);
@@ -56,7 +65,7 @@ export function CtaSlide({
           left: 0,
           width: W,
           height: 6,
-          background: `linear-gradient(90deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid}, ${BRAND.colors.gradientEnd})`,
+          background: `linear-gradient(90deg, ${th.gradientStart}, ${th.gradientMid}, ${th.gradientEnd})`,
         }}
       />
 
@@ -94,7 +103,7 @@ export function CtaSlide({
               style={{
                 width: 48,
                 height: 4,
-                backgroundColor: BRAND.colors.accent,
+                backgroundColor: th.accent,
                 borderRadius: 2,
               }}
             />
@@ -105,6 +114,7 @@ export function CtaSlide({
             fontWeight={800}
             maxWidth={CONTENT_W}
             highlightWords={slide.highlight_word ? [slide.highlight_word] : undefined}
+            brand={brand}
           />
         </div>
 
@@ -144,7 +154,7 @@ export function CtaSlide({
                 fontFamily: BRAND.fonts.headline,
                 fontSize: kwSize,
                 fontWeight: 800,
-                color: BRAND.colors.accent,
+                color: th.accent,
                 lineHeight: 1.0,
               }}
             >
@@ -202,7 +212,7 @@ export function CtaSlide({
               width: 100,
               height: 3,
               borderRadius: 2,
-              background: `linear-gradient(90deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid})`,
+              background: `linear-gradient(90deg, ${th.gradientStart}, ${th.gradientMid})`,
               marginBottom: 28,
             }}
           />
@@ -216,7 +226,7 @@ export function CtaSlide({
               width: 144,
               height: 144,
               borderRadius: '50%',
-              background: `linear-gradient(135deg, ${BRAND.colors.gradientStart}, ${BRAND.colors.gradientMid})`,
+              background: `linear-gradient(135deg, ${th.gradientStart}, ${th.gradientMid})`,
               marginBottom: 12,
             }}
           >
@@ -231,7 +241,10 @@ export function CtaSlide({
                 backgroundColor: BRAND.colors.bg,
               }}
             >
-              <img src={LOGO_BASE64} width={82} height={82} alt="" />
+              {isDefaultBrand
+                ? <img src={LOGO_BASE64} width={82} height={82} alt="" />
+                : <span style={{ fontFamily: BRAND.fonts.headline, fontSize: 32, fontWeight: 800, color: th.accent }}>{brand?.name ?? 'Brand'}</span>
+              }
             </div>
           </div>
 
@@ -245,7 +258,7 @@ export function CtaSlide({
                 color: BRAND.colors.textMuted,
               }}
             >
-              flowintelli.com
+              {brand?.website ?? 'flowintelli.com'}
             </span>
           </div>
         </div>
@@ -260,7 +273,7 @@ export function CtaSlide({
         style={{ position: 'absolute', bottom: FOOTER_BOTTOM - 40, right: 20 }}
       />
 
-      <ProgressBar position={slide.position} total={totalSlides} />
+      <ProgressBar position={slide.position} total={totalSlides} brand={brand} />
     </div>
   );
 }
