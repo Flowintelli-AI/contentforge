@@ -8,6 +8,9 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// Prisma seed
+// Run: npm run db:seed (from packages/db)
+
 model User {
   id             String          @id @default(cuid())
   clerkId        String          @unique
@@ -66,8 +69,9 @@ model CreatorProfile {
   videos          UploadedVideo[]
   inspireNiches   InspireNiche[]
   inspireAccounts InspireAccount[]
-  brandKit        BrandKit?
-  carouselRuns    CarouselRun[]
+  brandKit         BrandKit?
+  carouselRuns     CarouselRun[]
+  carouselPipeline CarouselPipeline?
 }
 
 model Niche {
@@ -85,6 +89,7 @@ model NicheOnCreator {
   creatorId String
   nicheId   String
   isPrimary Boolean        @default(false)
+  pillars   String[]       @default([]) // 3 content pillars the creator posts about in this niche
   creator   CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   niche     Niche          @relation(fields: [nicheId], references: [id])
 
@@ -602,6 +607,34 @@ model CarouselRun {
   creator     CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
 
   @@index([creatorId, createdAt])
+}
+
+// ─── Carousel Pipeline ────────────────────────────────────────────────────────
+
+// Per-creator auto-posting pipeline config
+model CarouselPipeline {
+  id        String         @id @default(cuid())
+  creatorId String         @unique
+  isActive  Boolean        @default(false)
+  maxPerDay Int            @default(1)
+  platforms String[]       @default(["instagram"])
+  lastRanAt DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  creator   CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+// Admin-managed: maps niche slugs to curated RSS feed URLs
+model NicheRssSource {
+  id         String   @id @default(cuid())
+  nicheSlug  String
+  sourceName String
+  rssUrl     String
+  priority   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([nicheSlug, isActive])
 }
 
 // ─── Inspire / Trend Spy ──────────────────────────────────────────────────────

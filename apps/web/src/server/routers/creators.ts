@@ -26,6 +26,14 @@ export const creatorsRouter = createTRPCRouter({
       z.object({
         niches: z.array(z.string()).min(1).max(3),
         postingGoal: z.number().int().min(1).max(200),
+        brand: z.object({
+          brandName: z.string().min(1).optional(),
+          handle: z.string().optional(),
+          primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+          accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+          logoUrl: z.string().url().optional().or(z.literal("")),
+        }).optional(),
+        pillars: z.array(z.string().max(60)).max(3).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -59,12 +67,30 @@ export const creatorsRouter = createTRPCRouter({
           update: {},
         });
 
+        const pillarsForNiche = i === 0 ? (input.pillars?.filter(Boolean) ?? []) : [];
+
         await ctx.db.nicheOnCreator.upsert({
           where: { creatorId_nicheId: { creatorId: profile.id, nicheId: niche.id } },
-          create: { creatorId: profile.id, nicheId: niche.id, isPrimary: i === 0 },
-          update: {},
+          create: { creatorId: profile.id, nicheId: niche.id, isPrimary: i === 0, pillars: pillarsForNiche },
+          update: { pillars: pillarsForNiche },
         });
       }
+
+      // Upsert brand kit if brand data was provided
+      if (input.brand && Object.values(input.brand).some(Boolean)) {
+        await ctx.db.brandKit.upsert({
+          where: { creatorId: profile.id },
+          create: { creatorId: profile.id, ...input.brand },
+          update: input.brand,
+        });
+      }
+
+      // Always create an inactive CarouselPipeline so the Pipeline tab works from day one
+      await ctx.db.carouselPipeline.upsert({
+        where: { creatorId: profile.id },
+        create: { creatorId: profile.id, isActive: false, maxPerDay: 2, platforms: ["instagram"] },
+        update: {},
+      });
 
       return profile;
     }),

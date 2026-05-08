@@ -95,6 +95,93 @@ export async function publishContainer(
   return data.id; // IG media ID
 }
 
+// ─── Carousel (multi-image album) publishing ─────────────────────────────────
+
+/**
+ * Create a single image child container for use in a carousel.
+ * @returns Instagram container ID for this child image.
+ */
+export async function createCarouselImageContainer(
+  accessToken: string,
+  igUserId: string,
+  imageUrl: string
+): Promise<string> {
+  const params = new URLSearchParams({
+    media_type: "IMAGE",
+    image_url: imageUrl,
+    is_carousel_item: "true",
+    access_token: accessToken,
+  });
+
+  const res = await fetch(`${IG_API}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  const data = (await res.json()) as { id?: string; error?: { message: string } };
+  if (!res.ok || !data.id) {
+    const msg = data.error?.message ?? `HTTP ${res.status}`;
+    throw new Error(`Instagram carousel child container failed: ${msg}`);
+  }
+
+  return data.id;
+}
+
+/**
+ * Publish a carousel (album) post from an array of public image URLs.
+ *
+ * Flow:
+ *   1. Create N child IMAGE containers (one per slide)
+ *   2. Create a CAROUSEL parent container referencing all children
+ *   3. Publish the parent container
+ *
+ * @param imageUrls — public HTTPS URLs for each slide (max 10)
+ * @returns Published Instagram media ID
+ */
+export async function publishCarouselPost(
+  accessToken: string,
+  igUserId: string,
+  imageUrls: string[],
+  caption: string
+): Promise<string> {
+  if (imageUrls.length < 2 || imageUrls.length > 10) {
+    throw new Error("Carousel requires 2–10 images");
+  }
+
+  // Step 1: create child containers in parallel
+  const childIds = await Promise.all(
+    imageUrls.map((url) => createCarouselImageContainer(accessToken, igUserId, url))
+  );
+
+  // Step 2: create carousel parent container
+  const carouselParams = new URLSearchParams({
+    media_type: "CAROUSEL",
+    children: childIds.join(","),
+    caption,
+    access_token: accessToken,
+  });
+
+  const carouselRes = await fetch(`${IG_API}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: carouselParams.toString(),
+  });
+
+  const carouselData = (await carouselRes.json()) as { id?: string; error?: { message: string } };
+  if (!carouselRes.ok || !carouselData.id) {
+    const msg = carouselData.error?.message ?? `HTTP ${carouselRes.status}`;
+    throw new Error(`Instagram carousel container creation failed: ${msg}`);
+  }
+
+  const parentContainerId = carouselData.id;
+
+  // Step 3: publish the carousel
+  return publishContainer(accessToken, igUserId, parentContainerId);
+}
+
+// ─── Container status polling ─────────────────────────────────────────────────
+
 /**
  * Poll the status of a container (useful for "post now" flow to wait for video processing).
  */
