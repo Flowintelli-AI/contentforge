@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/trpc/client";
 import {
   LayoutGrid,
@@ -87,6 +87,29 @@ function GenerateTab() {
     name: "", handle: "", niche: "", primary_color: "", accent_color: "", logo_url: "", website: "", voice_notes: "",
   });
   const [result, setResult] = useState<GenerateResult | null>(null);
+  const [pendingRunId, setPendingRunId] = useState<string | null>(null);
+
+  // Poll every 4s while a run is pending
+  const { data: polledRun } = api.carousel.getOne.useQuery(
+    { id: pendingRunId! },
+    { enabled: !!pendingRunId, refetchInterval: 4000 }
+  );
+
+  useEffect(() => {
+    if (!polledRun) return;
+    if (polledRun.status === "DONE") {
+      setResult({
+        run: { id: polledRun.id, title: polledRun.title, status: polledRun.status, createdAt: polledRun.createdAt },
+        slides: polledRun.slideUrls ?? [],
+        caption: polledRun.caption ?? "",
+        platformFitness: {},
+        postRecommendation: "",
+      });
+      setPendingRunId(null);
+    } else if (polledRun.status === "FAILED") {
+      setPendingRunId(null);
+    }
+  }, [polledRun]);
 
   const upd = (field: string, value: string) => setOverride((o) => ({ ...o, [field]: value }));
 
@@ -100,13 +123,16 @@ function GenerateTab() {
       platform,
       brandOverride: Object.keys(brandOverride).length > 0 ? brandOverride : undefined,
     });
-    setResult(res);
+    setResult(null);
+    setPendingRunId(res.run.id);
   };
 
   const handleDownloadPdf = () => {
     if (!result?.run) return;
     window.open(`/api/carousel/${result.run.id}/pdf`, "_blank");
   };
+
+  const isProcessing = generate.isPending || !!pendingRunId;
 
   return (
     <div className="space-y-6">
@@ -199,13 +225,13 @@ function GenerateTab() {
       {/* Generate button */}
       <button
         onClick={handleGenerate}
-        disabled={!title.trim() || !body.trim() || generate.isPending}
+        disabled={!title.trim() || !body.trim() || isProcessing}
         className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
       >
-        {generate.isPending ? (
+        {isProcessing ? (
           <>
             <Loader2 className="w-5 h-5 animate-spin" />
-            Generating 10 slides… (this may take ~30s)
+            {generate.isPending ? "Sending to Make…" : "Generating slides… (polling for results)"}
           </>
         ) : (
           <>

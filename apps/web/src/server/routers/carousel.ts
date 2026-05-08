@@ -94,6 +94,13 @@ export const carouselRouter = router({
       };
     }),
 
+  getOne: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const profile = await getProfile(ctx);
+      return ctx.db.carouselRun.findFirst({ where: { id: input.id, creatorId: profile.id } });
+    }),
+
   list: protectedProcedure
     .input(z.object({ cursor: z.string().optional(), limit: z.number().min(1).max(50).default(20) }))
     .query(async ({ ctx, input }) => {
