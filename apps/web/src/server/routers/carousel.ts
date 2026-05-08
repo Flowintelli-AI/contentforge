@@ -47,65 +47,50 @@ export const carouselRouter = router({
       const webhookUrl = process.env.MAKE_CAROUSEL_WEBHOOK_URL;
       if (!webhookUrl) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "MAKE_CAROUSEL_WEBHOOK_URL not configured" });
 
-      const payload = {
-        article_title: input.articleTitle,
-        article_body: input.articleBody,
-        platform: input.platform,
-        brand,
-      };
-
-      // Create a PENDING run first
+      // Create a PENDING run first so we have an ID to send to Make
       const run = await ctx.db.carouselRun.create({
         data: {
           creatorId: profile.id,
           title: input.articleTitle,
           platform: input.platform,
           status: "PENDING",
-          webhookPayload: payload as object,
+          webhookPayload: { article_title: input.articleTitle, platform: input.platform, brand } as object,
         },
       });
 
-      let result: {
-        slides_png_urls?: string[];
-        slides_cloudinary_urls?: string[];
-        pdf_base64?: string;
-        caption?: string;
-        platform_fitness?: Record<string, number>;
-        post_recommendation?: string;
+      const payload = {
+        carousel_run_id: run.id,
+        article_title: input.articleTitle,
+        article_body: input.articleBody,
+        platform: input.platform,
+        brand,
       };
 
+      // Fire-and-forget — Make responds immediately with {"accepted":true}
+      // Results come back via /api/carousel/callback
       try {
         const res = await fetch(webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
-        result = await res.json();
+        if (!res.ok) {
+          await ctx.db.carouselRun.update({ where: { id: run.id }, data: { status: "FAILED" } });
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Webhook returned ${res.status}` });
+        }
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         await ctx.db.carouselRun.update({ where: { id: run.id }, data: { status: "FAILED" } });
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Carousel generation failed: ${err}` });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Failed to reach Make webhook: ${err}` });
       }
 
-      const slideUrls = result.slides_cloudinary_urls ?? result.slides_png_urls ?? [];
-      const pdfUrl = result.pdf_base64 ? `data:application/pdf;base64,${result.pdf_base64}` : undefined;
-
-      const updated = await ctx.db.carouselRun.update({
-        where: { id: run.id },
-        data: {
-          status: "DONE",
-          slideUrls,
-          caption: result.caption ?? null,
-          pdfUrl: pdfUrl ?? null,
-        },
-      });
-
+      // Return the pending run — UI polls carousel.list to see when it becomes DONE
       return {
-        run: updated,
-        slides: slideUrls,
-        caption: result.caption ?? "",
-        platformFitness: result.platform_fitness ?? {},
-        postRecommendation: result.post_recommendation ?? "",
+        run,
+        slides: [],
+        caption: "",
+        platformFitness: {},
+        postRecommendation: "",
       };
     }),
 
