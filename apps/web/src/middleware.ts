@@ -25,6 +25,14 @@ const clerkHandler = clerkMiddleware(async (auth, req) => {
 });
 
 export default async function middleware(req: NextRequest) {
+  // Bypass Clerk entirely for cron and feed routes — they use their own auth
+  if (
+    req.nextUrl.pathname.startsWith("/api/cron/") ||
+    req.nextUrl.pathname.startsWith("/api/feeds/")
+  ) {
+    return NextResponse.next();
+  }
+
   // If Clerk keys are not configured, allow all requests through
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !process.env.CLERK_SECRET_KEY) {
     return NextResponse.next();
