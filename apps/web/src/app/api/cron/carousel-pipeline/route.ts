@@ -16,6 +16,7 @@ import { db } from "@contentforge/db";
 import { publishCarouselPost } from "@/lib/integrations/instagram/publisher";
 import { createLogger } from "@/lib/integrations/shared/logger";
 
+export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const logger = createLogger("cron-carousel-pipeline");
