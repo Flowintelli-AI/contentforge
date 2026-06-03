@@ -4,28 +4,6 @@
   "buildCommand": "npx next build",
   "outputDirectory": ".next",
   "regions": ["iad1"],
-  "crons": [
-    {
-      "path": "/api/cron/instagram-publish",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/extract-thumbnails",
-      "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/cron/instagram-token-refresh",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/trend-refresh",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/carousel-pipeline",
-      "schedule": "0 * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/api/webhooks/(.*)",

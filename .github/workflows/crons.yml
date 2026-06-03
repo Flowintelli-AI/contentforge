@@ -22,3 +22,24 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             "${{ secrets.APP_URL }}/api/cron/heygen-recover" \
             -o /dev/null -w "heygen-recover: %{http_code}\n" || true
+
+      - name: Extract Thumbnails Cron
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/extract-thumbnails" \
+            -o /dev/null -w "extract-thumbnails: %{http_code}\n" || true
+
+      - name: Instagram Token Refresh Cron
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/instagram-token-refresh" \
+            -o /dev/null -w "instagram-token-refresh: %{http_code}\n" || true
+
+      - name: Trend Refresh Cron
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/trend-refresh" \
+            -o /dev/null -w "trend-refresh: %{http_code}\n" || true
