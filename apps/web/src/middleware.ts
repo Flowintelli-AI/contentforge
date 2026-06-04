@@ -28,7 +28,8 @@ export default async function middleware(req: NextRequest) {
   // Bypass Clerk entirely for cron and feed routes — they use their own auth
   if (
     req.nextUrl.pathname.startsWith("/api/cron/") ||
-    req.nextUrl.pathname.startsWith("/api/feeds/")
+    req.nextUrl.pathname.startsWith("/api/feeds/") ||
+    req.nextUrl.pathname.startsWith("/api/debug/")
   ) {
     return NextResponse.next();
   }
