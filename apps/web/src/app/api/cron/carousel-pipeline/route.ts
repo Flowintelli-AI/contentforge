@@ -210,6 +210,13 @@ export async function GET(req: Request) {
         // Post to Instagram if connected and enough slides
         let mediaId: string | undefined;
         const igConn = creator.igConnection;
+        logger.info("IG post check", {
+          creatorId,
+          hasIgConn: !!igConn,
+          igUserId: igConn?.igUserId,
+          slideCount: slideUrls.length,
+          platforms: pipeline.platforms,
+        });
         if (igConn && slideUrls.length >= 2 && pipeline.platforms.includes("instagram")) {
           mediaId = await publishCarouselPost(
             igConn.accessToken,
@@ -237,7 +244,7 @@ export async function GET(req: Request) {
           data: { lastRanAt: now },
         });
 
-        return { creatorId, runId: run.id, mediaId, articleTitle: article.title };
+        return { creatorId, runId: run.id, mediaId, articleTitle: article.title, igConnected: !!igConn, slideCount: slideUrls.length };
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         logger.error("Pipeline run failed", { creatorId, reason });
