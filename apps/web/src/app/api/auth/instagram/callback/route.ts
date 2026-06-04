@@ -7,7 +7,6 @@
  */
 import { auth } from "@clerk/nextjs/server";
 import { type NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { db } from "@contentforge/db";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -29,12 +28,13 @@ export async function GET(req: NextRequest) {
   // User denied access
   if (oauthError) return redirect("error=ig_denied");
 
-  // Verify CSRF state
-  const cookieStore = cookies();
-  const savedState = cookieStore.get("ig_oauth_state")?.value;
-  cookieStore.delete("ig_oauth_state");
+  // Verify CSRF state — read from request cookies (not server-side cookie API)
+  const savedState = req.cookies.get("ig_oauth_state")?.value;
 
-  if (!state || state !== savedState) return redirect("error=ig_state_mismatch");
+  if (!state || state !== savedState) {
+    console.error("[instagram/oauth] state mismatch", { state, savedState });
+    return redirect("error=ig_state_mismatch");
+  }
   if (!code) return redirect("error=ig_no_code");
 
   const appId = process.env.INSTAGRAM_APP_ID;

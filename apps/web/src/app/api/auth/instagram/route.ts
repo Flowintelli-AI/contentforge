@@ -6,7 +6,6 @@
  */
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -26,14 +25,6 @@ export async function GET() {
 
   // CSRF state token — verified in callback
   const state = crypto.randomUUID();
-  const cookieStore = cookies();
-  cookieStore.set("ig_oauth_state", state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 600, // 10 min window to complete OAuth
-    path: "/",
-  });
 
   const redirectUri = `${APP_URL}/api/auth/instagram/callback`;
 
@@ -51,5 +42,14 @@ export async function GET() {
   oauthUrl.searchParams.set("response_type", "code");
   oauthUrl.searchParams.set("state", state);
 
-  return NextResponse.redirect(oauthUrl.toString());
+  // Set cookie on the redirect response (App Router requires this pattern)
+  const response = NextResponse.redirect(oauthUrl.toString());
+  response.cookies.set("ig_oauth_state", state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 600, // 10 min window to complete OAuth
+    path: "/",
+  });
+  return response;
 }
