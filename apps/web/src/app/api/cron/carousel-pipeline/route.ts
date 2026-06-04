@@ -72,6 +72,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Carousel API not configured" }, { status: 500 });
   }
 
+  const url = new URL(req.url);
+  const forceRun = url.searchParams.get("force") === "true";
+
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -100,7 +103,8 @@ export async function GET(req: Request) {
       const creator = pipeline.creator;
 
       try {
-        // Enforce maxPerDay cap
+        // Enforce maxPerDay cap (skip if force=true)
+        if (!forceRun) {
         const todayRuns = await db.carouselRun.count({
           where: {
             creatorId,
@@ -111,6 +115,7 @@ export async function GET(req: Request) {
         if (todayRuns >= pipeline.maxPerDay) {
           logger.info("maxPerDay reached, skipping", { creatorId, todayRuns, maxPerDay: pipeline.maxPerDay });
           return { creatorId, skipped: true, reason: "maxPerDay" };
+        }
         }
 
         // Fetch feed items
